@@ -1,20 +1,105 @@
 /**
  * Game store - manages all game state and logic
  * Uses crypto-secure randomness for fair gameplay
+ * Includes resilient storage with automatic recovery
  */
 
-import * as Crypto from 'expo-crypto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 
 // Storage keys
 const STORAGE_KEY = 'impostor_game_v1';
 const CUSTOM_CATEGORIES_KEY = 'impostor_custom_categories_v1';
 
+// ============ RESILIENT STORAGE UTILITIES ============
+
+const STORAGE_TIMEOUT = 5000; // 5 seconds max for any storage operation
+
+/**
+ * Wrap a promise with a timeout
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
+/**
+ * Safely parse JSON with validation
+ */
+function safeJsonParse<T>(json: string | null, validator?: (data: unknown) => data is T): T | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json);
+    if (validator && !validator(parsed)) {
+      return null;
+    }
+    return parsed as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Safe storage read with timeout and error recovery
+ */
+async function safeStorageGet(key: string): Promise<string | null> {
+  try {
+    return await withTimeout(
+      AsyncStorage.getItem(key),
+      STORAGE_TIMEOUT,
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Safe storage write with timeout and error recovery
+ */
+async function safeStorageSet(key: string, value: string): Promise<boolean> {
+  try {
+    await withTimeout(
+      AsyncStorage.setItem(key, value),
+      STORAGE_TIMEOUT,
+      undefined
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Safe storage remove with timeout
+ */
+async function safeStorageRemove(key: string): Promise<boolean> {
+  try {
+    await withTimeout(
+      AsyncStorage.removeItem(key),
+      STORAGE_TIMEOUT,
+      undefined
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Clear potentially corrupted data
+ */
+export async function clearCorruptedData(): Promise<void> {
+  await safeStorageRemove(STORAGE_KEY);
+  await safeStorageRemove(CUSTOM_CATEGORIES_KEY);
+}
+
 // Category type definition
 export interface Category {
   emoji: string;
   name: string;
-  description: string;
   words: string[];
   isCustom?: boolean;
 }
@@ -26,13 +111,11 @@ export const DEFAULT_CATEGORIES: Categories = {
   mixta: {
     emoji: '🎲',
     name: 'Mixta',
-    description: 'Todas las categorías',
     words: [], // Will be populated dynamically
   },
   lugares: {
     emoji: '📍',
     name: 'Lugares',
-    description: 'Aeropuerto, Hospital, etc.',
     words: [
       'Playa', 'Submarino', 'Escuela', 'Circo', 'Banco', 'Avión', 'Hospital',
       'Base Militar', 'Supermercado', 'Hotel', 'Restaurante', 'Aeropuerto',
@@ -44,7 +127,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   comida: {
     emoji: '🍕',
     name: 'Comida',
-    description: 'Pizza, Sushi, Tacos, etc.',
     words: [
       'Hamburguesa', 'Sushi', 'Pizza', 'Tacos', 'Helado', 'Ensalada',
       'Pastas', 'Sopa', 'Empanada', 'Hot Dog', 'Arroz', 'Pollo',
@@ -56,7 +138,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   animales: {
     emoji: '🦁',
     name: 'Animales',
-    description: 'León, Pingüino, etc.',
     words: [
       'Perro', 'Gato', 'Elefante', 'Tiburón', 'Águila', 'Serpiente',
       'Pingüino', 'León', 'Tigre', 'Mono', 'Delfín', 'Ballena',
@@ -68,7 +149,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   profesiones: {
     emoji: '👨‍⚕️',
     name: 'Profesiones',
-    description: 'Doctor, Chef, etc.',
     words: [
       'Doctor', 'Maestro', 'Policía', 'Bombero', 'Chef', 'Piloto',
       'Ingeniero', 'Abogado', 'Arquitecto', 'Enfermero', 'Dentista',
@@ -80,7 +160,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   objetos: {
     emoji: '📱',
     name: 'Objetos',
-    description: 'Teléfono, Reloj, etc.',
     words: [
       'Teléfono', 'Computadora', 'Llave', 'Mochila', 'Reloj', 'Lápiz',
       'Cuaderno', 'Silla', 'Mesa', 'Televisor', 'Cámara', 'Botella',
@@ -92,7 +171,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   transporte: {
     emoji: '🚗',
     name: 'Transporte',
-    description: 'Carro, Avión, etc.',
     words: [
       'Carro', 'Moto', 'Bicicleta', 'Avión', 'Barco', 'Submarino',
       'Tren', 'Metro', 'Autobús', 'Camión', 'Helicóptero', 'Patineta',
@@ -103,7 +181,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   emociones: {
     emoji: '😊',
     name: 'Emociones',
-    description: 'Felicidad, Tristeza, etc.',
     words: [
       'Felicidad', 'Tristeza', 'Enojo', 'Miedo', 'Sorpresa', 'Nervios',
       'Vergüenza', 'Orgullo', 'Celos', 'Ansiedad', 'Calma', 'Emoción',
@@ -114,7 +191,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   acciones: {
     emoji: '🏃',
     name: 'Acciones',
-    description: 'Correr, Bailar, etc.',
     words: [
       'Correr', 'Saltar', 'Dormir', 'Comer', 'Nadar', 'Cantar',
       'Bailar', 'Leer', 'Escribir', 'Gritar', 'Pensar', 'Reír',
@@ -126,7 +202,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   peliculas: {
     emoji: '🎬',
     name: 'Películas',
-    description: 'Géneros y clásicos del cine',
     words: [
       'Titanic', 'Avatar', 'Matrix', 'Inception', 'Gladiador', 'Forrest Gump',
       'El Padrino', 'Jurassic Park', 'Toy Story', 'Frozen', 'Coco', 'Shrek',
@@ -137,7 +212,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   deportes: {
     emoji: '⚽',
     name: 'Deportes',
-    description: 'Fútbol, Tenis, etc.',
     words: [
       'Fútbol', 'Básquetbol', 'Tenis', 'Béisbol', 'Golf', 'Natación',
       'Boxeo', 'Karate', 'Judo', 'Ciclismo', 'Atletismo', 'Gimnasia',
@@ -148,7 +222,6 @@ export const DEFAULT_CATEGORIES: Categories = {
   musica: {
     emoji: '🎵',
     name: 'Música',
-    description: 'Géneros e instrumentos',
     words: [
       'Guitarra', 'Piano', 'Batería', 'Violín', 'Trompeta', 'Saxofón',
       'Flauta', 'Acordeón', 'Arpa', 'Rock', 'Pop', 'Jazz',
@@ -207,12 +280,24 @@ export interface GameState {
 }
 
 /**
- * Generate cryptographically secure random number
+ * Generate cryptographically secure random number with fallback
  */
 async function secureRandom(max: number): Promise<number> {
-  const randomBytes = await Crypto.getRandomBytesAsync(4);
-  const randomValue = new DataView(randomBytes.buffer).getUint32(0, true);
-  return randomValue % max;
+  try {
+    const randomBytes = await withTimeout(
+      Crypto.getRandomBytesAsync(4),
+      2000,
+      null
+    );
+    if (randomBytes) {
+      const randomValue = new DataView(randomBytes.buffer).getUint32(0, true);
+      return randomValue % max;
+    }
+  } catch {
+    // Silently fail - Math.random is not secure but good enough for our use case
+  }
+  // Fallback to Math.random if crypto fails
+  return Math.floor(Math.random() * max);
 }
 
 /**
@@ -244,89 +329,124 @@ export function createInitialState(): GameState {
 }
 
 /**
- * Save game state to storage
+ * Validate game state structure
  */
-export async function saveGameState(state: Partial<GameState>): Promise<void> {
+function isValidGameState(data: unknown): data is Partial<GameState> {
+  if (!data || typeof data !== 'object') return false;
+  const state = data as Record<string, unknown>;
+  if (state.players !== undefined) {
+    if (!Array.isArray(state.players)) return false;
+    if (!state.players.every(p => typeof p === 'string')) return false;
+  }
+  if (state.selectedCategory !== undefined && typeof state.selectedCategory !== 'string') {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Save game state to storage (resilient)
+ */
+export async function saveGameState(state: Partial<GameState>): Promise<boolean> {
   try {
     const existing = await loadGameState();
     const merged = { ...existing, ...state };
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-  } catch (error) {
-    console.error('Failed to save game state:', error);
+    const json = JSON.stringify(merged);
+    return await safeStorageSet(STORAGE_KEY, json);
+  } catch {
+    return false;
   }
 }
 
 /**
- * Load game state from storage
+ * Load game state from storage (resilient)
  */
 export async function loadGameState(): Promise<Partial<GameState>> {
   try {
-    const saved = await AsyncStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      return JSON.parse(saved);
+    const saved = await safeStorageGet(STORAGE_KEY);
+    const parsed = safeJsonParse<Partial<GameState>>(saved, isValidGameState);
+    if (parsed) {
+      return parsed;
     }
-  } catch (error) {
-    console.error('Failed to load game state:', error);
+    if (saved !== null) {
+      await safeStorageRemove(STORAGE_KEY);
+    }
+  } catch {
+    // Silently fail and return empty state
   }
   return {};
 }
 
 /**
- * Clear all saved game state
+ * Clear all saved game state (resilient)
  */
-export async function clearGameState(): Promise<void> {
-  try {
-    await AsyncStorage.removeItem(STORAGE_KEY);
-  } catch (error) {
-    console.error('Failed to clear game state:', error);
-  }
+export async function clearGameState(): Promise<boolean> {
+  return await safeStorageRemove(STORAGE_KEY);
 }
 
 // ============ CATEGORY MANAGEMENT ============
 
 /**
- * Load custom categories from storage
+ * Validate category structure
+ */
+function isValidCategory(cat: unknown): cat is Category {
+  if (!cat || typeof cat !== 'object') return false;
+  const c = cat as Record<string, unknown>;
+  return typeof c.emoji === 'string' &&
+         typeof c.name === 'string' &&
+         Array.isArray(c.words) &&
+         c.words.every(w => typeof w === 'string');
+}
+
+/**
+ * Validate categories object
+ */
+function isValidCategories(data: unknown): data is Categories {
+  if (!data || typeof data !== 'object') return false;
+  return Object.values(data).every(isValidCategory);
+}
+
+/**
+ * Load custom categories from storage (resilient)
  */
 export async function loadCustomCategories(): Promise<void> {
   try {
-    const saved = await AsyncStorage.getItem(CUSTOM_CATEGORIES_KEY);
-    if (saved) {
-      const customCategories: Categories = JSON.parse(saved);
-      // Merge with defaults, custom categories override defaults
+    const saved = await safeStorageGet(CUSTOM_CATEGORIES_KEY);
+    const customCategories = safeJsonParse<Categories>(saved, isValidCategories);
+
+    if (customCategories) {
       CATEGORIES = updateMixedCategory({
         ...DEFAULT_CATEGORIES,
         ...customCategories,
       });
     } else {
+      if (saved !== null) {
+        await safeStorageRemove(CUSTOM_CATEGORIES_KEY);
+      }
       CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
     }
-  } catch (error) {
-    console.error('Failed to load custom categories:', error);
+  } catch {
     CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
   }
 }
 
 /**
- * Save custom categories to storage
+ * Save custom categories to storage (resilient)
  */
-export async function saveCustomCategories(): Promise<void> {
+export async function saveCustomCategories(): Promise<boolean> {
   try {
-    // Only save categories that differ from defaults or are custom
     const customCategories: Categories = {};
 
     for (const [key, category] of Object.entries(CATEGORIES)) {
-      if (key === 'mixta') continue; // Don't save mixta, it's auto-generated
+      if (key === 'mixta') continue;
 
       const defaultCategory = DEFAULT_CATEGORIES[key];
       if (!defaultCategory || category.isCustom) {
-        // New custom category
         customCategories[key] = { ...category, isCustom: true };
       } else {
-        // Check if modified from default
         const wordsChanged = JSON.stringify(category.words) !== JSON.stringify(defaultCategory.words);
         const metaChanged = category.name !== defaultCategory.name ||
-                          category.emoji !== defaultCategory.emoji ||
-                          category.description !== defaultCategory.description;
+                          category.emoji !== defaultCategory.emoji;
 
         if (wordsChanged || metaChanged) {
           customCategories[key] = category;
@@ -334,22 +454,19 @@ export async function saveCustomCategories(): Promise<void> {
       }
     }
 
-    await AsyncStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(customCategories));
-  } catch (error) {
-    console.error('Failed to save custom categories:', error);
+    return await safeStorageSet(CUSTOM_CATEGORIES_KEY, JSON.stringify(customCategories));
+  } catch {
+    return false;
   }
 }
 
 /**
- * Reset all categories to defaults
+ * Reset all categories to defaults (resilient)
  */
-export async function resetCategoriesToDefault(): Promise<void> {
-  try {
-    await AsyncStorage.removeItem(CUSTOM_CATEGORIES_KEY);
-    CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
-  } catch (error) {
-    console.error('Failed to reset categories:', error);
-  }
+export async function resetCategoriesToDefault(): Promise<boolean> {
+  const success = await safeStorageRemove(CUSTOM_CATEGORIES_KEY);
+  CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
+  return success;
 }
 
 /**
@@ -408,7 +525,6 @@ export async function createCategory(
   key: string,
   name: string,
   emoji: string,
-  description: string,
   words: string[] = []
 ): Promise<boolean> {
   if (CATEGORIES[key]) return false; // Key already exists
@@ -416,7 +532,6 @@ export async function createCategory(
   CATEGORIES[key] = {
     emoji,
     name,
-    description,
     words,
     isCustom: true,
   };
@@ -443,7 +558,7 @@ export async function deleteCategory(key: string): Promise<boolean> {
  */
 export async function updateCategoryMeta(
   key: string,
-  updates: { name?: string; emoji?: string; description?: string }
+  updates: { name?: string; emoji?: string }
 ): Promise<void> {
   if (key === 'mixta') return;
 
@@ -468,8 +583,7 @@ export function isCategoryModified(key: string): boolean {
 
   return JSON.stringify(current.words) !== JSON.stringify(defaultCat.words) ||
          current.name !== defaultCat.name ||
-         current.emoji !== defaultCat.emoji ||
-         current.description !== defaultCat.description;
+         current.emoji !== defaultCat.emoji;
 }
 
 /**
@@ -525,7 +639,6 @@ export function getCategoryOptions() {
     key,
     emoji: value.emoji,
     name: value.name,
-    description: value.description,
     wordCount: value.words.length,
     isCustom: value.isCustom || false,
     isModified: isCategoryModified(key),

@@ -44,7 +44,6 @@ export default function SettingsScreen() {
   const [showNewCategoryModal, setShowNewCategoryModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryEmoji, setNewCategoryEmoji] = useState('📝');
-  const [newCategoryDesc, setNewCategoryDesc] = useState('');
 
   useEffect(() => {
     loadCustomCategories().then(() => {
@@ -158,7 +157,6 @@ export default function SettingsScreen() {
   const handleCreateCategory = useCallback(async () => {
     const name = newCategoryName.trim();
     const emoji = newCategoryEmoji.trim() || '📝';
-    const desc = newCategoryDesc.trim() || 'Categoría personalizada';
 
     if (!name) {
       hapticFeedback('error');
@@ -167,7 +165,7 @@ export default function SettingsScreen() {
     }
 
     const key = name.toLowerCase().replace(/\s+/g, '_');
-    const success = await createCategory(key, name, emoji, desc);
+    const success = await createCategory(key, name, emoji);
 
     if (!success) {
       hapticFeedback('error');
@@ -179,11 +177,10 @@ export default function SettingsScreen() {
     setShowNewCategoryModal(false);
     setNewCategoryName('');
     setNewCategoryEmoji('📝');
-    setNewCategoryDesc('');
     refreshCategories();
     setSelectedCategory(key);
     setCategoryWords([]);
-  }, [newCategoryName, newCategoryEmoji, newCategoryDesc, hapticFeedback, refreshCategories]);
+  }, [newCategoryName, newCategoryEmoji, hapticFeedback, refreshCategories]);
 
   const handleDeleteCategory = useCallback(async () => {
     if (!selectedCategory) return;
@@ -234,7 +231,19 @@ export default function SettingsScreen() {
             <Ionicons name="arrow-back" size={24} color={GameColors.accent} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>⚙️ Configuración</Text>
-          <View style={styles.headerSpacer} />
+          {!selectedCategory ? (
+            <TouchableOpacity
+              style={styles.addCategoryHeaderButton}
+              onPress={() => {
+                hapticFeedback('light');
+                setShowNewCategoryModal(true);
+              }}
+            >
+              <Ionicons name="add" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.headerSpacer} />
+          )}
         </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -283,18 +292,6 @@ export default function SettingsScreen() {
                 </TouchableOpacity>
               </Animated.View>
             ))}
-
-            {/* Add Category Button */}
-            <TouchableOpacity
-              style={styles.addCategoryButton}
-              onPress={() => {
-                hapticFeedback('light');
-                setShowNewCategoryModal(true);
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.addCategoryButtonText}>+ Crear categoría</Text>
-            </TouchableOpacity>
 
             {/* Reset All Button */}
             <TouchableOpacity
@@ -435,15 +432,6 @@ export default function SettingsScreen() {
               autoCapitalize="words"
             />
 
-            <Text style={styles.inputLabel}>Descripción (opcional)</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Descripción breve"
-              placeholderTextColor={GameColors.textMuted}
-              value={newCategoryDesc}
-              onChangeText={setNewCategoryDesc}
-            />
-
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.modalCancelButton}
@@ -497,6 +485,12 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 44,
+  },
+  addCategoryHeaderButton: {
+    padding: Spacing.sm,
+    backgroundColor: GameColors.accent,
+    borderRadius: BorderRadius.full,
+    ...Shadows.colored(GameColors.accent),
   },
   content: {
     flex: 1,
@@ -573,27 +567,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: GameColors.textMuted,
   },
-  addCategoryButton: {
-    backgroundColor: GameColors.card,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    alignItems: 'center',
-    marginTop: Spacing.md,
-    borderWidth: 2,
-    borderColor: GameColors.accent,
-    borderStyle: 'dashed',
-  },
-  addCategoryButtonText: {
-    color: GameColors.accent,
-    fontSize: 16,
-    fontWeight: '700',
-  },
   resetAllButton: {
     backgroundColor: GameColors.dangerLight,
     padding: Spacing.md,
     borderRadius: BorderRadius.lg,
     alignItems: 'center',
-    marginTop: Spacing.xl,
+    marginTop: Spacing.lg,
     marginBottom: Spacing.xxl,
   },
   resetAllButtonText: {

@@ -44,18 +44,23 @@ export default function ImpostorGame() {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [categoryOptions, setCategoryOptions] = useState(getCategoryOptions());
 
-  // Load custom categories and saved state on mount
+  // Load custom categories and saved state on mount (resilient)
   useEffect(() => {
     (async () => {
-      await loadCustomCategories();
-      setCategoryOptions(getCategoryOptions());
-      const saved = await loadGameState();
-      if (saved.players && saved.players.length > 0) {
-        setState(prev => ({
-          ...prev,
-          players: saved.players || [],
-          selectedCategory: saved.selectedCategory || 'mixta',
-        }));
+      try {
+        await loadCustomCategories();
+        setCategoryOptions(getCategoryOptions());
+        const saved = await loadGameState();
+        if (saved.players && saved.players.length > 0) {
+          setState(prev => ({
+            ...prev,
+            players: saved.players || [],
+            selectedCategory: saved.selectedCategory || 'mixta',
+          }));
+        }
+      } catch {
+        // Silently fail - app will work with defaults
+        setCategoryOptions(getCategoryOptions());
       }
     })();
   }, []);
@@ -63,35 +68,42 @@ export default function ImpostorGame() {
   // Refresh categories when screen gains focus (returning from settings)
   useFocusEffect(
     useCallback(() => {
-      loadCustomCategories().then(() => {
-        setCategoryOptions(getCategoryOptions());
-      });
+      loadCustomCategories()
+        .then(() => setCategoryOptions(getCategoryOptions()))
+        .catch(() => setCategoryOptions(getCategoryOptions()));
     }, [])
   );
 
-  // Save players when they change
+  // Save players when they change (fire and forget, don't block UI)
   useEffect(() => {
     if (state.players.length > 0) {
       saveGameState({
         players: state.players,
         selectedCategory: state.selectedCategory,
+      }).catch(() => {
+        // Silently fail - not critical
       });
     }
   }, [state.players, state.selectedCategory]);
 
+  // Safe haptic feedback that won't crash the app
   const hapticFeedback = useCallback((type: 'light' | 'medium' | 'success' | 'warning' | 'error') => {
-    const styles: Record<string, Haptics.ImpactFeedbackStyle | Haptics.NotificationFeedbackType> = {
-      light: Haptics.ImpactFeedbackStyle.Light,
-      medium: Haptics.ImpactFeedbackStyle.Medium,
-      success: Haptics.NotificationFeedbackType.Success,
-      warning: Haptics.NotificationFeedbackType.Warning,
-      error: Haptics.NotificationFeedbackType.Error,
-    };
+    try {
+      const styles: Record<string, Haptics.ImpactFeedbackStyle | Haptics.NotificationFeedbackType> = {
+        light: Haptics.ImpactFeedbackStyle.Light,
+        medium: Haptics.ImpactFeedbackStyle.Medium,
+        success: Haptics.NotificationFeedbackType.Success,
+        warning: Haptics.NotificationFeedbackType.Warning,
+        error: Haptics.NotificationFeedbackType.Error,
+      };
 
-    if (type === 'success' || type === 'warning' || type === 'error') {
-      Haptics.notificationAsync(styles[type] as Haptics.NotificationFeedbackType);
-    } else {
-      Haptics.impactAsync(styles[type] as Haptics.ImpactFeedbackStyle);
+      if (type === 'success' || type === 'warning' || type === 'error') {
+        Haptics.notificationAsync(styles[type] as Haptics.NotificationFeedbackType).catch(() => {});
+      } else {
+        Haptics.impactAsync(styles[type] as Haptics.ImpactFeedbackStyle).catch(() => {});
+      }
+    } catch {
+      // Haptics not available - silently ignore
     }
   }, []);
 
@@ -122,15 +134,20 @@ export default function ImpostorGame() {
       return;
     }
 
-    hapticFeedback('success');
-    const gameData = await startNewGame(state.players, state.selectedCategory);
+    try {
+      hapticFeedback('success');
+      const gameData = await startNewGame(state.players, state.selectedCategory);
 
-    setState(prev => ({
-      ...prev,
-      ...gameData,
-      currentPlayerIndex: 0,
-      currentScreen: 'pass',
-    }));
+      setState(prev => ({
+        ...prev,
+        ...gameData,
+        currentPlayerIndex: 0,
+        currentScreen: 'pass',
+      }));
+    } catch {
+      hapticFeedback('error');
+      Alert.alert('Error', 'No se pudo iniciar el juego. Intenta de nuevo.');
+    }
   }, [state.players, state.selectedCategory, hapticFeedback]);
 
   const handleRevealRole = useCallback(() => {
@@ -178,15 +195,20 @@ export default function ImpostorGame() {
   }, [hapticFeedback]);
 
   const handlePlayAgain = useCallback(async () => {
-    hapticFeedback('medium');
-    const gameData = await startNewGame(state.players, state.selectedCategory);
+    try {
+      hapticFeedback('medium');
+      const gameData = await startNewGame(state.players, state.selectedCategory);
 
-    setState(prev => ({
-      ...prev,
-      ...gameData,
-      currentPlayerIndex: 0,
-      currentScreen: 'pass',
-    }));
+      setState(prev => ({
+        ...prev,
+        ...gameData,
+        currentPlayerIndex: 0,
+        currentScreen: 'pass',
+      }));
+    } catch {
+      hapticFeedback('error');
+      Alert.alert('Error', 'No se pudo iniciar el juego. Intenta de nuevo.');
+    }
   }, [state.players, state.selectedCategory, hapticFeedback]);
 
   const handleResetAll = useCallback(() => {
@@ -199,9 +221,14 @@ export default function ImpostorGame() {
           text: 'Borrar todo',
           style: 'destructive',
           onPress: async () => {
-            hapticFeedback('warning');
-            await clearGameState();
-            setState(createInitialState());
+            try {
+              hapticFeedback('warning');
+              await clearGameState();
+              setState(createInitialState());
+            } catch {
+              // Reset state anyway even if storage clear fails
+              setState(createInitialState());
+            }
           },
         },
       ]
@@ -235,9 +262,22 @@ export default function ImpostorGame() {
             exiting={FadeOut.duration(200)}
             style={styles.screenContainer}
           >
-            {/* Settings Button */}
+            {/* Header Row: Category (left) + Settings (right) */}
             <View style={styles.headerRow}>
-              <View style={styles.headerSpacer} />
+              <TouchableOpacity
+                style={styles.categoryChip}
+                onPress={() => {
+                  hapticFeedback('light');
+                  setShowCategoryPicker(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.categoryChipText}>
+                  {selectedCategoryInfo.emoji} {selectedCategoryInfo.name}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={GameColors.textMuted} />
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.settingsButton}
                 onPress={() => {
@@ -250,10 +290,8 @@ export default function ImpostorGame() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
+            {/* Fixed Header Section */}
+            <View style={styles.setupHeader}>
               <Text style={styles.title}>🕵️‍♂️ El Impostor</Text>
               <Text style={styles.subtitle}>
                 Agrega a los jugadores (Mínimo 3)
@@ -278,7 +316,14 @@ export default function ImpostorGame() {
                   <Text style={styles.addButtonText}>+</Text>
                 </TouchableOpacity>
               </View>
+            </View>
 
+            {/* Scrollable Player List */}
+            <ScrollView
+              style={styles.playerScrollView}
+              contentContainerStyle={styles.playerScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
               {state.players.length > 0 && (
                 <View style={styles.playerList}>
                   {state.players.map((player, index) => (
@@ -299,42 +344,23 @@ export default function ImpostorGame() {
                   ))}
                 </View>
               )}
-
-              {state.players.length >= 3 && (
-                <Animated.View
-                  entering={FadeIn.delay(200)}
-                  style={styles.setupControls}
-                >
-                  <View style={styles.divider} />
-
-                  <Text style={styles.sectionTitle}>Elige una categoría:</Text>
-
-                  <TouchableOpacity
-                    style={styles.categorySelector}
-                    onPress={() => {
-                      hapticFeedback('light');
-                      setShowCategoryPicker(true);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.categorySelectorText}>
-                      {selectedCategoryInfo.emoji} {selectedCategoryInfo.name}
-                    </Text>
-                    <Ionicons name="chevron-down" size={20} color={GameColors.textMuted} />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.primaryButton}
-                    onPress={handleStartGame}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.primaryButtonText}>
-                      ¡COMENZAR JUEGO!
-                    </Text>
-                  </TouchableOpacity>
-                </Animated.View>
-              )}
             </ScrollView>
+
+            {/* Floating Action Button */}
+            {state.players.length >= 3 && (
+              <Animated.View
+                entering={ZoomIn.springify()}
+                style={styles.fabContainer}
+              >
+                <TouchableOpacity
+                  style={styles.fab}
+                  onPress={handleStartGame}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="play" size={28} color="#FFFFFF" />
+                </TouchableOpacity>
+              </Animated.View>
+            )}
           </Animated.View>
         )}
 
@@ -590,9 +616,6 @@ export default function ImpostorGame() {
                       <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
                       <View style={styles.categoryInfo}>
                         <Text style={styles.categoryName}>{cat.name}</Text>
-                        <Text style={styles.categoryDescription}>
-                          {cat.description}
-                        </Text>
                         <Text style={styles.categoryWordCount}>
                           {cat.wordCount} palabras
                         </Text>
@@ -622,15 +645,41 @@ const styles = StyleSheet.create({
   screenContainer: {
     flex: 1,
   },
+  setupHeader: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xl,
+  },
+  playerScrollView: {
+    flex: 1,
+  },
+  playerScrollContent: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.md,
+  },
   headerRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.sm,
+    gap: Spacing.sm,
   },
-  headerSpacer: {
-    flex: 1,
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.full,
+    backgroundColor: GameColors.card,
+    borderWidth: 1,
+    borderColor: GameColors.inputBorder,
+    ...Shadows.small,
+  },
+  categoryChipText: {
+    color: GameColors.text,
+    fontSize: 14,
+    fontWeight: '500',
   },
   settingsButton: {
     padding: Spacing.sm + 4,
@@ -640,11 +689,19 @@ const styles = StyleSheet.create({
     borderColor: GameColors.inputBorder,
     ...Shadows.small,
   },
-  scrollContent: {
-    flexGrow: 1,
+  fabContainer: {
+    position: 'absolute',
+    bottom: Spacing.xl,
+    right: Spacing.lg,
+  },
+  fab: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: GameColors.accent,
     justifyContent: 'center',
-    padding: Spacing.lg,
-    paddingTop: Spacing.sm,
+    alignItems: 'center',
+    ...Shadows.large,
   },
   centerContainer: {
     flex: 1,
@@ -722,38 +779,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  setupControls: {
-    marginTop: Spacing.md,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: GameColors.inputBorder,
-    marginVertical: Spacing.lg,
-  },
-  sectionTitle: {
-    color: GameColors.textSecondary,
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: Spacing.md,
-    textAlign: 'center',
-  },
-  categorySelector: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: GameColors.card,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    marginBottom: Spacing.md,
-    borderWidth: 1.5,
-    borderColor: GameColors.inputBorder,
-    ...Shadows.small,
-  },
-  categorySelectorText: {
-    color: GameColors.text,
-    fontSize: 16,
-    fontWeight: '500',
-  },
   // Modal styles
   modalOverlay: {
     flex: 1,
@@ -813,11 +838,6 @@ const styles = StyleSheet.create({
     color: GameColors.text,
     fontSize: 17,
     fontWeight: '700',
-  },
-  categoryDescription: {
-    color: GameColors.textSecondary,
-    fontSize: 13,
-    marginTop: 2,
   },
   categoryWordCount: {
     color: GameColors.textMuted,
