@@ -563,8 +563,8 @@ export default function ImpostorGame() {
               </View>
 
               <ScrollView
-                style={styles.modalScroll}
                 showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.modalScrollContent}
               >
                 {categoryOptions.map((cat, index) => (
                   <Animated.View
@@ -785,9 +785,9 @@ const styles = StyleSheet.create({
     backgroundColor: GameColors.backgroundAlt,
     borderRadius: BorderRadius.full,
   },
-  modalScroll: {
+  modalScrollContent: {
     padding: Spacing.md,
-    paddingBottom: Spacing.xxl,
+    paddingBottom: 50,
   },
   categoryOption: {
     flexDirection: 'row',
