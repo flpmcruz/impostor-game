@@ -47,6 +47,9 @@ export const GameColors = {
   citizen: '#10B981',         // Emerald
   citizenLight: '#D1FAE5',
   citizenGlow: 'rgba(16, 185, 129, 0.15)',
+  jester: '#F59E0B',          // Amber/Gold for the Jester
+  jesterLight: '#FEF3C7',
+  jesterGlow: 'rgba(245, 158, 11, 0.15)',
 
   // Fun pattern colors
   pattern1: '#FDE68A',        // Yellow

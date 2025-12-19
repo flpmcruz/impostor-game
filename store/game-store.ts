@@ -263,15 +263,94 @@ export type CategoryKey = string;
 
 export type GameScreen = 'setup' | 'pass' | 'reveal' | 'playing' | 'end';
 
+// ============ GAME VARIANTS ============
+
+export type GameVariant = 'classic' | 'double-impostor' | 'accomplices' | 'jester' | 'chaos';
+
+export type PlayerRole = 'citizen' | 'impostor' | 'jester';
+
+export interface PlayerRoleInfo {
+  role: PlayerRole;
+  knowsWord: boolean;
+  partnerName?: string; // For accomplices mode
+}
+
+export interface GameVariantConfig {
+  id: GameVariant;
+  name: string;
+  emoji: string;
+  description: string;
+  minPlayers: number;
+  impostorCount: number;
+  hasJester: boolean;
+  impostorsKnowEachOther: boolean;
+}
+
+export const GAME_VARIANTS: Record<GameVariant, GameVariantConfig> = {
+  classic: {
+    id: 'classic',
+    name: 'Clásico',
+    emoji: '🎭',
+    description: '1 impostor que no conoce la palabra',
+    minPlayers: 3,
+    impostorCount: 1,
+    hasJester: false,
+    impostorsKnowEachOther: false,
+  },
+  'double-impostor': {
+    id: 'double-impostor',
+    name: 'Doble Agente',
+    emoji: '👺👺',
+    description: '2 impostores que NO se conocen entre sí',
+    minPlayers: 5,
+    impostorCount: 2,
+    hasJester: false,
+    impostorsKnowEachOther: false,
+  },
+  accomplices: {
+    id: 'accomplices',
+    name: 'Compinches',
+    emoji: '🤝',
+    description: '2 impostores que SÍ se conocen entre sí',
+    minPlayers: 5,
+    impostorCount: 2,
+    hasJester: false,
+    impostorsKnowEachOther: true,
+  },
+  jester: {
+    id: 'jester',
+    name: 'Bufón',
+    emoji: '🤡',
+    description: '1 impostor + 1 bufón que quiere ser votado',
+    minPlayers: 4,
+    impostorCount: 1,
+    hasJester: true,
+    impostorsKnowEachOther: false,
+  },
+  chaos: {
+    id: 'chaos',
+    name: 'Caos Total',
+    emoji: '🌪️',
+    description: '2 impostores + 1 bufón (máxima confusión)',
+    minPlayers: 6,
+    impostorCount: 2,
+    hasJester: true,
+    impostorsKnowEachOther: false,
+  },
+};
+
 export interface GameState {
   // Setup state
   players: string[];
   selectedCategory: CategoryKey;
+  selectedVariant: GameVariant;
 
   // Game state
   shuffledPlayers: string[];
   currentPlayerIndex: number;
-  impostorIndex: number;
+  impostorIndices: number[]; // Changed to array for multiple impostors
+  jesterIndex: number; // -1 if no jester
+  playerRoles: PlayerRoleInfo[]; // Role info for each shuffled player
   secretWord: string;
   starterPlayer: string;
 
@@ -319,9 +398,12 @@ export function createInitialState(): GameState {
   return {
     players: [],
     selectedCategory: 'mixta',
+    selectedVariant: 'classic',
     shuffledPlayers: [],
     currentPlayerIndex: 0,
-    impostorIndex: -1,
+    impostorIndices: [],
+    jesterIndex: -1,
+    playerRoles: [],
     secretWord: '',
     starterPlayer: '',
     currentScreen: 'setup',
@@ -339,6 +421,9 @@ function isValidGameState(data: unknown): data is Partial<GameState> {
     if (!state.players.every(p => typeof p === 'string')) return false;
   }
   if (state.selectedCategory !== undefined && typeof state.selectedCategory !== 'string') {
+    return false;
+  }
+  if (state.selectedVariant !== undefined && typeof state.selectedVariant !== 'string') {
     return false;
   }
   return true;
@@ -600,17 +685,77 @@ export async function resetCategoryToDefault(key: string): Promise<void> {
 // ============ GAME FUNCTIONS ============
 
 /**
- * Start a new game with current players
+ * Select unique random indices from an array
+ */
+async function selectUniqueIndices(count: number, max: number, exclude: number[] = []): Promise<number[]> {
+  const indices: number[] = [];
+  const available = Array.from({ length: max }, (_, i) => i).filter(i => !exclude.includes(i));
+
+  for (let i = 0; i < count && available.length > 0; i++) {
+    const randomPos = await secureRandom(available.length);
+    indices.push(available[randomPos]);
+    available.splice(randomPos, 1);
+  }
+
+  return indices;
+}
+
+/**
+ * Start a new game with current players and variant
  */
 export async function startNewGame(
   players: string[],
-  category: CategoryKey
-): Promise<Pick<GameState, 'shuffledPlayers' | 'impostorIndex' | 'secretWord' | 'starterPlayer'>> {
+  category: CategoryKey,
+  variant: GameVariant = 'classic'
+): Promise<Pick<GameState, 'shuffledPlayers' | 'impostorIndices' | 'jesterIndex' | 'playerRoles' | 'secretWord' | 'starterPlayer'>> {
+  const variantConfig = GAME_VARIANTS[variant];
+
   // Shuffle players for random order
   const shuffledPlayers = await shuffleArray(players);
+  const playerCount = shuffledPlayers.length;
 
-  // Select impostor
-  const impostorIndex = await secureRandom(shuffledPlayers.length);
+  // Select impostors
+  const impostorIndices = await selectUniqueIndices(variantConfig.impostorCount, playerCount);
+
+  // Select jester if variant has one
+  let jesterIndex = -1;
+  if (variantConfig.hasJester) {
+    const jesterIndices = await selectUniqueIndices(1, playerCount, impostorIndices);
+    jesterIndex = jesterIndices[0] ?? -1;
+  }
+
+  // Build player roles array
+  const playerRoles: PlayerRoleInfo[] = shuffledPlayers.map((_, index) => {
+    if (impostorIndices.includes(index)) {
+      // Impostor role
+      const role: PlayerRoleInfo = {
+        role: 'impostor',
+        knowsWord: false,
+      };
+
+      // If accomplices mode, add partner name
+      if (variantConfig.impostorsKnowEachOther && variantConfig.impostorCount > 1) {
+        const partnerIndex = impostorIndices.find(i => i !== index);
+        if (partnerIndex !== undefined) {
+          role.partnerName = shuffledPlayers[partnerIndex];
+        }
+      }
+
+      return role;
+    } else if (index === jesterIndex) {
+      // Jester role - knows the word but wants to be voted
+      return {
+        role: 'jester',
+        knowsWord: true,
+      };
+    } else {
+      // Citizen role
+      return {
+        role: 'citizen',
+        knowsWord: true,
+      };
+    }
+  });
 
   // Get words for category
   const words = CATEGORIES[category]?.words || CATEGORIES.mixta.words;
@@ -620,15 +765,31 @@ export async function startNewGame(
   const secretWord = words[wordIndex];
 
   // Select starter player
-  const starterIndex = await secureRandom(shuffledPlayers.length);
+  const starterIndex = await secureRandom(playerCount);
   const starterPlayer = shuffledPlayers[starterIndex];
 
   return {
     shuffledPlayers,
-    impostorIndex,
+    impostorIndices,
+    jesterIndex,
+    playerRoles,
     secretWord,
     starterPlayer,
   };
+}
+
+/**
+ * Get available variants based on player count
+ */
+export function getAvailableVariants(playerCount: number): GameVariantConfig[] {
+  return Object.values(GAME_VARIANTS).filter(v => playerCount >= v.minPlayers);
+}
+
+/**
+ * Check if a variant is valid for the given player count
+ */
+export function isVariantValid(variant: GameVariant, playerCount: number): boolean {
+  return playerCount >= GAME_VARIANTS[variant].minPlayers;
 }
 
 /**

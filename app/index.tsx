@@ -1,20 +1,19 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
-  Modal,
+  View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   FadeIn,
   FadeOut,
@@ -22,19 +21,22 @@ import Animated, {
   SlideOutLeft,
   ZoomIn,
 } from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GameColors, Spacing, BorderRadius, Shadows } from '@/constants/theme';
 import { PatternBackground } from '@/components/pattern-background';
+import { BorderRadius, GameColors, Shadows, Spacing } from '@/constants/theme';
 import {
+  clearGameState,
+  createInitialState,
+  GAME_VARIANTS,
   GameState,
   getCategories,
   getCategoryOptions,
-  createInitialState,
-  saveGameState,
-  loadGameState,
-  clearGameState,
-  startNewGame,
+  isVariantValid,
   loadCustomCategories,
+  loadGameState,
+  saveGameState,
+  startNewGame,
 } from '@/store/game-store';
 
 export default function ImpostorGame() {
@@ -42,6 +44,7 @@ export default function ImpostorGame() {
   const [playerInput, setPlayerInput] = useState('');
   const [isButtonDisabled, setIsButtonDisabled] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [showVariantPicker, setShowVariantPicker] = useState(false);
   const [categoryOptions, setCategoryOptions] = useState(getCategoryOptions());
 
   // Load custom categories and saved state on mount (resilient)
@@ -56,6 +59,7 @@ export default function ImpostorGame() {
             ...prev,
             players: saved.players || [],
             selectedCategory: saved.selectedCategory || 'mixta',
+            selectedVariant: saved.selectedVariant || 'classic',
           }));
         }
       } catch {
@@ -80,11 +84,12 @@ export default function ImpostorGame() {
       saveGameState({
         players: state.players,
         selectedCategory: state.selectedCategory,
+        selectedVariant: state.selectedVariant,
       }).catch(() => {
         // Silently fail - not critical
       });
     }
-  }, [state.players, state.selectedCategory]);
+  }, [state.players, state.selectedCategory, state.selectedVariant]);
 
   // Safe haptic feedback that won't crash the app
   const hapticFeedback = useCallback((type: 'light' | 'medium' | 'success' | 'warning' | 'error') => {
@@ -128,15 +133,24 @@ export default function ImpostorGame() {
   }, [hapticFeedback]);
 
   const handleStartGame = useCallback(async () => {
-    if (state.players.length < 3) {
+    const variantConfig = GAME_VARIANTS[state.selectedVariant];
+
+    if (state.players.length < variantConfig.minPlayers) {
       hapticFeedback('error');
-      Alert.alert('Error', 'Se necesitan al menos 3 jugadores');
+      Alert.alert(
+        'Jugadores insuficientes',
+        `El modo "${variantConfig.name}" necesita al menos ${variantConfig.minPlayers} jugadores`
+      );
       return;
     }
 
     try {
       hapticFeedback('success');
-      const gameData = await startNewGame(state.players, state.selectedCategory);
+      const gameData = await startNewGame(
+        state.players,
+        state.selectedCategory,
+        state.selectedVariant
+      );
 
       setState(prev => ({
         ...prev,
@@ -148,7 +162,7 @@ export default function ImpostorGame() {
       hapticFeedback('error');
       Alert.alert('Error', 'No se pudo iniciar el juego. Intenta de nuevo.');
     }
-  }, [state.players, state.selectedCategory, hapticFeedback]);
+  }, [state.players, state.selectedCategory, state.selectedVariant, hapticFeedback]);
 
   const handleRevealRole = useCallback(() => {
     hapticFeedback('medium');
@@ -197,7 +211,11 @@ export default function ImpostorGame() {
   const handlePlayAgain = useCallback(async () => {
     try {
       hapticFeedback('medium');
-      const gameData = await startNewGame(state.players, state.selectedCategory);
+      const gameData = await startNewGame(
+        state.players,
+        state.selectedCategory,
+        state.selectedVariant
+      );
 
       setState(prev => ({
         ...prev,
@@ -209,7 +227,7 @@ export default function ImpostorGame() {
       hapticFeedback('error');
       Alert.alert('Error', 'No se pudo iniciar el juego. Intenta de nuevo.');
     }
-  }, [state.players, state.selectedCategory, hapticFeedback]);
+  }, [state.players, state.selectedCategory, state.selectedVariant, hapticFeedback]);
 
   const handleResetAll = useCallback(() => {
     Alert.alert(
@@ -243,10 +261,12 @@ export default function ImpostorGame() {
     }));
   }, [hapticFeedback]);
 
-  const isImpostor = state.currentPlayerIndex === state.impostorIndex;
+  // Get current player's role info
+  const currentPlayerRole = state.playerRoles[state.currentPlayerIndex];
   const currentPlayer = state.shuffledPlayers[state.currentPlayerIndex];
   const categories = getCategories();
   const selectedCategoryInfo = categories[state.selectedCategory] || categories.mixta;
+  const selectedVariantInfo = GAME_VARIANTS[state.selectedVariant];
 
   return (
     <PatternBackground>
@@ -262,32 +282,64 @@ export default function ImpostorGame() {
             exiting={FadeOut.duration(200)}
             style={styles.screenContainer}
           >
-            {/* Header Row: Category (left) + Settings (right) */}
+            {/* Header Row: Category + Variant + Help + Settings */}
             <View style={styles.headerRow}>
-              <TouchableOpacity
-                style={styles.categoryChip}
-                onPress={() => {
-                  hapticFeedback('light');
-                  setShowCategoryPicker(true);
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.categoryChipText}>
-                  {selectedCategoryInfo.emoji} {selectedCategoryInfo.name}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color={GameColors.textMuted} />
-              </TouchableOpacity>
+              <View style={styles.headerChips}>
+                <TouchableOpacity
+                  style={styles.categoryChip}
+                  onPress={() => {
+                    hapticFeedback('light');
+                    setShowCategoryPicker(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.categoryChipText}>
+                    {selectedCategoryInfo.emoji} {selectedCategoryInfo.name}
+                  </Text>
+                  <Ionicons name="chevron-down" size={14} color={GameColors.textMuted} />
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.settingsButton}
-                onPress={() => {
-                  hapticFeedback('light');
-                  router.push('/settings');
-                }}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="settings-outline" size={22} color={GameColors.textMuted} />
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.categoryChip,
+                    !isVariantValid(state.selectedVariant, state.players.length) && styles.chipDisabled
+                  ]}
+                  onPress={() => {
+                    hapticFeedback('light');
+                    setShowVariantPicker(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.categoryChipText}>
+                    {selectedVariantInfo.emoji}
+                  </Text>
+                  <Ionicons name="chevron-down" size={14} color={GameColors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.headerButtons}>
+                <TouchableOpacity
+                  style={styles.helpButton}
+                  onPress={() => {
+                    hapticFeedback('light');
+                    router.push('/help');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.helpButtonText}>?</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.settingsButton}
+                  onPress={() => {
+                    hapticFeedback('light');
+                    router.push('/settings');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="settings-outline" size={22} color={GameColors.textMuted} />
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Fixed Header Section */}
@@ -410,36 +462,68 @@ export default function ImpostorGame() {
         )}
 
         {/* REVEAL SCREEN */}
-        {state.currentScreen === 'reveal' && (
+        {state.currentScreen === 'reveal' && currentPlayerRole && (
           <Animated.View
             entering={FadeIn.duration(300)}
             exiting={FadeOut.duration(200)}
             style={styles.centerContainer}
           >
             <Text style={styles.roleTitle}>
-              {isImpostor ? 'TÚ ERES EL' : 'LA PALABRA ES'}
+              {currentPlayerRole.role === 'citizen' ? 'LA PALABRA ES' : 'TÚ ERES EL'}
             </Text>
 
             <Animated.View
               entering={ZoomIn.delay(200).springify()}
               style={[
                 styles.roleCard,
-                isImpostor ? styles.impostorCard : styles.citizenCard,
+                currentPlayerRole.role === 'impostor' && styles.impostorCard,
+                currentPlayerRole.role === 'citizen' && styles.citizenCard,
+                currentPlayerRole.role === 'jester' && styles.jesterCard,
               ]}
             >
-              <Text
-                style={[
-                  styles.secretWord,
-                  { color: isImpostor ? GameColors.impostor : GameColors.citizen },
-                ]}
-              >
-                {isImpostor ? '👺 IMPOSTOR' : state.secretWord}
-              </Text>
-              <Text style={styles.roleDescription}>
-                {isImpostor
-                  ? 'No sabes la palabra secreta. ¡Miente y mézclate!'
-                  : 'Eres un ciudadano inocente. Encuentra al impostor.'}
-              </Text>
+              {/* Role display based on player's role */}
+              {currentPlayerRole.role === 'impostor' && (
+                <>
+                  <Text style={[styles.secretWord, { color: GameColors.impostor }]}>
+                    👺 IMPOSTOR
+                  </Text>
+                  <Text style={styles.roleDescription}>
+                    No sabes la palabra secreta. ¡Miente y mézclate!
+                  </Text>
+                  {currentPlayerRole.partnerName && (
+                    <View style={styles.partnerInfo}>
+                      <Text style={styles.partnerLabel}>Tu compinche es:</Text>
+                      <Text style={styles.partnerName}>{currentPlayerRole.partnerName}</Text>
+                    </View>
+                  )}
+                </>
+              )}
+
+              {currentPlayerRole.role === 'jester' && (
+                <>
+                  <Text style={[styles.secretWord, { color: GameColors.jester }]}>
+                    🤡 BUFÓN
+                  </Text>
+                  <Text style={styles.roleDescription}>
+                    ¡Tu objetivo es que te voten! Actúa sospechoso pero no muy obvio.
+                  </Text>
+                  <View style={styles.wordHint}>
+                    <Text style={styles.wordHintLabel}>La palabra es:</Text>
+                    <Text style={styles.wordHintValue}>{state.secretWord}</Text>
+                  </View>
+                </>
+              )}
+
+              {currentPlayerRole.role === 'citizen' && (
+                <>
+                  <Text style={[styles.secretWord, { color: GameColors.citizen }]}>
+                    {state.secretWord}
+                  </Text>
+                  <Text style={styles.roleDescription}>
+                    Eres un ciudadano inocente. Encuentra al impostor.
+                  </Text>
+                </>
+              )}
             </Animated.View>
 
             <TouchableOpacity
@@ -465,12 +549,25 @@ export default function ImpostorGame() {
           >
             <Text style={styles.title}>¡A JUGAR! 🗣️</Text>
 
+            <View style={styles.variantBadge}>
+              <Text style={styles.variantBadgeText}>
+                {selectedVariantInfo.emoji} {selectedVariantInfo.name}
+              </Text>
+            </View>
+
             <Text style={styles.instruction}>
-              El impostor está entre nosotros.
+              {state.impostorIndices.length > 1
+                ? 'Los impostores están entre nosotros.'
+                : 'El impostor está entre nosotros.'}
             </Text>
             <Text style={styles.instruction}>
-              Hagan preguntas sutiles para descubrirlo.
+              Hagan preguntas sutiles para descubrirlo{state.impostorIndices.length > 1 ? 's' : ''}.
             </Text>
+            {state.jesterIndex >= 0 && (
+              <Text style={[styles.instruction, { color: GameColors.jester }]}>
+                ⚠️ ¡Cuidado! Hay un bufón que quiere ser votado.
+              </Text>
+            )}
 
             <View style={styles.infoCard}>
               <Text style={styles.infoLabel}>Jugador Inicial Sugerido:</Text>
@@ -483,7 +580,7 @@ export default function ImpostorGame() {
               activeOpacity={0.8}
             >
               <Text style={styles.endGameButtonText}>
-                🎭 Finalizar y Revelar Impostor
+                🎭 Finalizar y Revelar Roles
               </Text>
             </TouchableOpacity>
 
@@ -518,53 +615,100 @@ export default function ImpostorGame() {
           >
             <Text style={styles.title}>🎭 ¡JUEGO TERMINADO!</Text>
 
-            <Animated.View
-              entering={ZoomIn.delay(200)}
-              style={styles.revealCard}
+            <ScrollView
+              style={styles.endScrollView}
+              contentContainerStyle={styles.endScrollContent}
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.revealLabel}>El impostor era:</Text>
-              <Text style={styles.impostorName}>
-                👺 {state.shuffledPlayers[state.impostorIndex]}
-              </Text>
-            </Animated.View>
+              {/* Impostors reveal */}
+              <Animated.View
+                entering={ZoomIn.delay(200)}
+                style={styles.revealCard}
+              >
+                <Text style={styles.revealLabel}>
+                  {state.impostorIndices.length > 1 ? 'Los impostores eran:' : 'El impostor era:'}
+                </Text>
+                {state.impostorIndices.map((idx, i) => (
+                  <Text key={idx} style={styles.impostorName}>
+                    👺 {state.shuffledPlayers[idx]}
+                  </Text>
+                ))}
+              </Animated.View>
 
-            <Animated.View
-              entering={ZoomIn.delay(400)}
-              style={styles.wordRevealCard}
-            >
-              <Text style={styles.revealLabel}>La palabra secreta era:</Text>
-              <Text style={styles.wordReveal}>{state.secretWord}</Text>
-            </Animated.View>
+              {/* Jester reveal (if applicable) */}
+              {state.jesterIndex >= 0 && (
+                <Animated.View
+                  entering={ZoomIn.delay(300)}
+                  style={styles.jesterRevealCard}
+                >
+                  <Text style={styles.revealLabel}>El bufón era:</Text>
+                  <Text style={styles.jesterName}>
+                    🤡 {state.shuffledPlayers[state.jesterIndex]}
+                  </Text>
+                </Animated.View>
+              )}
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handlePlayAgain}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.secondaryButtonText}>
-                Jugar de nuevo (mismos jugadores)
-              </Text>
-            </TouchableOpacity>
+              {/* Word reveal */}
+              <Animated.View
+                entering={ZoomIn.delay(400)}
+                style={styles.wordRevealCard}
+              >
+                <Text style={styles.revealLabel}>La palabra secreta era:</Text>
+                <Text style={styles.wordReveal}>{state.secretWord}</Text>
+              </Animated.View>
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleBackToSetup}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.secondaryButtonText}>
-                Volver a configuración
-              </Text>
-            </TouchableOpacity>
+              {/* Win conditions hint */}
+              <Animated.View
+                entering={FadeIn.delay(500)}
+                style={styles.winConditionsCard}
+              >
+                <Text style={styles.winConditionsTitle}>¿Quién ganó?</Text>
+                <Text style={styles.winCondition}>
+                  🏆 <Text style={{ fontWeight: '700' }}>Ciudadanos:</Text> Si votaron a{' '}
+                  {state.impostorIndices.length > 1 ? 'los impostores' : 'el impostor'}
+                </Text>
+                <Text style={styles.winCondition}>
+                  👺 <Text style={{ fontWeight: '700' }}>Impostor{state.impostorIndices.length > 1 ? 'es' : ''}:</Text> Si no fueron descubiertos
+                </Text>
+                {state.jesterIndex >= 0 && (
+                  <Text style={styles.winCondition}>
+                    🤡 <Text style={{ fontWeight: '700' }}>Bufón:</Text> Si fue votado como sospechoso
+                  </Text>
+                )}
+              </Animated.View>
+            </ScrollView>
 
-            <TouchableOpacity
-              style={styles.dangerButton}
-              onPress={handleResetAll}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.dangerButtonText}>
-                🗑️ Borrar todo y empezar de cero
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.endButtons}>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={handlePlayAgain}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  Jugar de nuevo (mismos jugadores)
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={handleBackToSetup}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  Volver a configuración
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.dangerButton}
+                onPress={handleResetAll}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.dangerButtonText}>
+                  🗑️ Borrar todo y empezar de cero
+                </Text>
+              </TouchableOpacity>
+            </View>
           </Animated.View>
         )}
         </KeyboardAvoidingView>
@@ -630,6 +774,91 @@ export default function ImpostorGame() {
             </View>
           </View>
         </Modal>
+
+        {/* Variant Picker Modal */}
+        <Modal
+          visible={showVariantPicker}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowVariantPicker(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>🎮 Modo de Juego</Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowVariantPicker(false)}
+                >
+                  <Ionicons name="close" size={24} color={GameColors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.modalScrollContent}
+              >
+                {Object.values(GAME_VARIANTS).map((variant, index) => {
+                  const isAvailable = state.players.length >= variant.minPlayers;
+                  return (
+                    <Animated.View
+                      key={variant.id}
+                      entering={SlideInRight.delay(index * 30)}
+                    >
+                      <TouchableOpacity
+                        style={[
+                          styles.variantOption,
+                          state.selectedVariant === variant.id && styles.variantOptionSelected,
+                          !isAvailable && styles.variantOptionDisabled,
+                        ]}
+                        onPress={() => {
+                          if (isAvailable) {
+                            hapticFeedback('light');
+                            setState(prev => ({
+                              ...prev,
+                              selectedVariant: variant.id,
+                            }));
+                            setShowVariantPicker(false);
+                          } else {
+                            hapticFeedback('warning');
+                          }
+                        }}
+                        activeOpacity={isAvailable ? 0.7 : 1}
+                      >
+                        <Text style={styles.variantEmoji}>{variant.emoji}</Text>
+                        <View style={styles.variantInfo}>
+                          <Text style={[
+                            styles.variantName,
+                            !isAvailable && styles.variantNameDisabled
+                          ]}>
+                            {variant.name}
+                          </Text>
+                          <Text style={styles.variantDescription}>
+                            {variant.description}
+                          </Text>
+                          <Text style={[
+                            styles.variantMinPlayers,
+                            !isAvailable && styles.variantMinPlayersWarning
+                          ]}>
+                            Mínimo {variant.minPlayers} jugadores
+                            {!isAvailable && ` (faltan ${variant.minPlayers - state.players.length})`}
+                          </Text>
+                        </View>
+                        {state.selectedVariant === variant.id && isAvailable && (
+                          <Ionicons name="checkmark-circle" size={24} color={GameColors.accent} />
+                        )}
+                        {!isAvailable && (
+                          <Ionicons name="lock-closed" size={20} color={GameColors.textMuted} />
+                        )}
+                      </TouchableOpacity>
+                    </Animated.View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
       </SafeAreaView>
     </PatternBackground>
   );
@@ -682,11 +911,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   settingsButton: {
-    padding: Spacing.sm + 4,
-    borderRadius: BorderRadius.full,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: GameColors.card,
     borderWidth: 1,
     borderColor: GameColors.inputBorder,
+    justifyContent: 'center',
+    alignItems: 'center',
     ...Shadows.small,
   },
   fabContainer: {
@@ -1028,5 +1260,186 @@ const styles = StyleSheet.create({
     color: GameColors.citizen,
     fontSize: 30,
     fontWeight: '800',
+  },
+  // Header styles
+  headerChips: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    flex: 1,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  helpButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: GameColors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...Shadows.small,
+  },
+  helpButtonText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  chipDisabled: {
+    opacity: 0.5,
+  },
+  // Jester card style
+  jesterCard: {
+    borderColor: GameColors.jester,
+    backgroundColor: GameColors.jesterLight,
+  },
+  // Partner info for accomplices mode
+  partnerInfo: {
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: GameColors.impostor + '40',
+    alignItems: 'center',
+  },
+  partnerLabel: {
+    color: GameColors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: Spacing.xs,
+  },
+  partnerName: {
+    color: GameColors.impostor,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  // Word hint for jester
+  wordHint: {
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: GameColors.jester + '40',
+    alignItems: 'center',
+  },
+  wordHintLabel: {
+    color: GameColors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: Spacing.xs,
+  },
+  wordHintValue: {
+    color: GameColors.jester,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  // Variant badge on playing screen
+  variantBadge: {
+    backgroundColor: GameColors.accentLight + '30',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+    marginBottom: Spacing.md,
+  },
+  variantBadgeText: {
+    color: GameColors.accent,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Variant picker styles
+  variantOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.sm,
+    backgroundColor: GameColors.backgroundAlt,
+  },
+  variantOptionSelected: {
+    backgroundColor: GameColors.accentLight + '30',
+    borderWidth: 2,
+    borderColor: GameColors.accent,
+  },
+  variantOptionDisabled: {
+    opacity: 0.5,
+  },
+  variantEmoji: {
+    fontSize: 32,
+    marginRight: Spacing.md,
+  },
+  variantInfo: {
+    flex: 1,
+  },
+  variantName: {
+    color: GameColors.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  variantNameDisabled: {
+    color: GameColors.textMuted,
+  },
+  variantDescription: {
+    color: GameColors.textSecondary,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  variantMinPlayers: {
+    color: GameColors.textMuted,
+    fontSize: 11,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  variantMinPlayersWarning: {
+    color: GameColors.danger,
+  },
+  // End screen styles
+  endScrollView: {
+    flex: 1,
+    width: '100%',
+  },
+  endScrollContent: {
+    paddingBottom: Spacing.md,
+  },
+  endButtons: {
+    width: '100%',
+    paddingTop: Spacing.md,
+  },
+  jesterRevealCard: {
+    borderWidth: 3,
+    borderColor: GameColors.jester,
+    backgroundColor: GameColors.jesterLight,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.xl,
+    marginVertical: Spacing.md,
+    width: '100%',
+    alignItems: 'center',
+    ...Shadows.large,
+  },
+  jesterName: {
+    color: GameColors.jester,
+    fontSize: 30,
+    fontWeight: '800',
+  },
+  winConditionsCard: {
+    backgroundColor: GameColors.card,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    marginTop: Spacing.md,
+    borderWidth: 1,
+    borderColor: GameColors.inputBorder,
+  },
+  winConditionsTitle: {
+    color: GameColors.text,
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: Spacing.sm,
+    textAlign: 'center',
+  },
+  winCondition: {
+    color: GameColors.textSecondary,
+    fontSize: 14,
+    marginTop: Spacing.xs,
+    lineHeight: 20,
   },
 });
