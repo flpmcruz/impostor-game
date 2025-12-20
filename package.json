@@ -8,6 +8,7 @@
     "android": "expo run:android",
     "android:clean": "rm -rf android && npx expo prebuild --platform android && npx expo run:android",
     "android:prod": "rm -rf android && npx expo run:android --variant release ",
+    "android:install": "adb install -r android/app/build/outputs/apk/release/app-release.apk 2>&1",
     "android:rebuild": "npx expo prebuild --platform android --clean && npx expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
