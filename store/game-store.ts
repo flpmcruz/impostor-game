@@ -469,17 +469,9 @@ export async function saveGameState(state: Partial<GameState>): Promise<boolean>
       }
     }
 
-    // Merge with existing config (not full state)
-    const existing = await loadGameState();
-    const merged: PersistableConfig = {};
-    for (const key of PERSISTABLE_KEYS) {
-      const value = configToSave[key] ?? existing[key as keyof typeof existing];
-      if (value !== undefined) {
-        (merged as Record<string, unknown>)[key] = value;
-      }
-    }
-
-    const json = JSON.stringify(merged);
+    // Save directly without loading existing state (optimization)
+    // Since we always save all 3 fields together, no merge needed
+    const json = JSON.stringify(configToSave);
     return await safeStorageSet(STORAGE_KEY, json);
   } catch {
     return false;

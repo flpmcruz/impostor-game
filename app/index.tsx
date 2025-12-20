@@ -48,8 +48,8 @@ export default function ImpostorGame() {
   const [showVariantPicker, setShowVariantPicker] = useState(false);
   const [categoryOptions, setCategoryOptions] = useState(getCategoryOptions());
 
-  // Track if initial load is done to avoid redundant calls
-  const [isInitialized, setIsInitialized] = useState(false);
+  // Track if we've navigated away (to know when to refresh on focus)
+  const hasNavigatedAway = React.useRef(false);
 
   // Load saved state on mount (categories already loaded in _layout.tsx)
   useEffect(() => {
@@ -81,29 +81,32 @@ export default function ImpostorGame() {
 
         const elapsed = Date.now() - startTime;
         debugLog.info(LogCategory.UI, `ImpostorGame initialization completed in ${elapsed}ms`);
-        setIsInitialized(true);
       } catch (err) {
         debugLog.error(LogCategory.UI, 'ImpostorGame initialization failed', { error: String(err) });
         setCategoryOptions(getCategoryOptions());
-        setIsInitialized(true);
       }
 
       await persistLogs();
     })();
   }, []);
 
-  // Refresh categories ONLY when returning from settings (not on initial mount)
+  // Refresh categories ONLY when returning from settings
   useFocusEffect(
     useCallback(() => {
-      if (!isInitialized) {
-        // Skip on initial mount - categories already loaded
-        return;
+      // Only refresh if we previously navigated away
+      if (hasNavigatedAway.current) {
+        debugLog.debug(LogCategory.UI, 'Returned from settings, refreshing categories');
+        loadCustomCategories()
+          .then(() => setCategoryOptions(getCategoryOptions()))
+          .catch(() => setCategoryOptions(getCategoryOptions()));
+        hasNavigatedAway.current = false;
       }
-      debugLog.debug(LogCategory.UI, 'Screen focused, refreshing categories');
-      loadCustomCategories()
-        .then(() => setCategoryOptions(getCategoryOptions()))
-        .catch(() => setCategoryOptions(getCategoryOptions()));
-    }, [isInitialized])
+
+      // Track when we leave this screen
+      return () => {
+        hasNavigatedAway.current = true;
+      };
+    }, [])
   );
 
   // Save players when they change (fire and forget, don't block UI)
