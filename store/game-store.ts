@@ -6,7 +6,6 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
-import { debugLog, LogCategory, persistLogs } from '@/utils/debug-logger';
 
 // Storage keys
 const STORAGE_KEY = 'impostor_game_v1';
@@ -46,22 +45,9 @@ function safeJsonParse<T>(json: string | null, validator?: (data: unknown) => da
  * Safe storage read with timeout and error recovery
  */
 async function safeStorageGet(key: string): Promise<string | null> {
-  const startTime = Date.now();
-  debugLog.debug(LogCategory.STORAGE, `safeStorageGet started`, { key });
-
   try {
-    const result = await withTimeout(
-      AsyncStorage.getItem(key),
-      STORAGE_TIMEOUT,
-      null
-    );
-    const elapsed = Date.now() - startTime;
-    const size = result ? result.length : 0;
-    debugLog.debug(LogCategory.STORAGE, `safeStorageGet completed`, { key, elapsed, size });
-    return result;
-  } catch (err) {
-    const elapsed = Date.now() - startTime;
-    debugLog.error(LogCategory.STORAGE, `safeStorageGet failed`, { key, elapsed, error: String(err) });
+    return await withTimeout(AsyncStorage.getItem(key), STORAGE_TIMEOUT, null);
+  } catch {
     return null;
   }
 }
@@ -482,37 +468,21 @@ export async function saveGameState(state: Partial<GameState>): Promise<boolean>
  * Load game state from storage (resilient)
  */
 export async function loadGameState(): Promise<Partial<GameState>> {
-  const startTime = Date.now();
-  debugLog.info(LogCategory.STORAGE, 'loadGameState started');
-
   try {
     const saved = await safeStorageGet(STORAGE_KEY);
-    debugLog.debug(LogCategory.STORAGE, 'Game state raw data', {
-      hasData: saved !== null,
-      size: saved?.length ?? 0,
-    });
-
     const parsed = safeJsonParse<Partial<GameState>>(saved, isValidGameState);
 
     if (parsed) {
-      debugLog.info(LogCategory.STORAGE, 'Game state loaded', {
-        players: parsed.players?.length ?? 0,
-        category: parsed.selectedCategory,
-        variant: parsed.selectedVariant,
-      });
       return parsed;
     }
 
     if (saved !== null) {
-      debugLog.warn(LogCategory.STORAGE, 'Invalid game state found, removing corrupted data');
       await safeStorageRemove(STORAGE_KEY);
     }
-  } catch (err) {
-    debugLog.error(LogCategory.STORAGE, 'loadGameState failed', { error: String(err) });
+  } catch {
+    // Silently fail
   }
 
-  const elapsed = Date.now() - startTime;
-  debugLog.debug(LogCategory.STORAGE, `loadGameState completed in ${elapsed}ms (empty state)`);
   return {};
 }
 
@@ -549,39 +519,24 @@ function isValidCategories(data: unknown): data is Categories {
  * Load custom categories from storage (resilient)
  */
 export async function loadCustomCategories(): Promise<void> {
-  const startTime = Date.now();
-  debugLog.info(LogCategory.CATEGORIES, 'loadCustomCategories started');
-
   try {
     const saved = await safeStorageGet(CUSTOM_CATEGORIES_KEY);
-    debugLog.debug(LogCategory.CATEGORIES, 'Raw data retrieved', { hasData: saved !== null });
-
     const customCategories = safeJsonParse<Categories>(saved, isValidCategories);
-    debugLog.debug(LogCategory.CATEGORIES, 'Parse result', { valid: customCategories !== null });
 
     if (customCategories) {
-      const customCount = Object.keys(customCategories).length;
       CATEGORIES = updateMixedCategory({
         ...DEFAULT_CATEGORIES,
         ...customCategories,
       });
-      debugLog.info(LogCategory.CATEGORIES, 'Custom categories loaded', { customCount });
     } else {
       if (saved !== null) {
-        debugLog.warn(LogCategory.CATEGORIES, 'Invalid data found, removing corrupted storage');
         await safeStorageRemove(CUSTOM_CATEGORIES_KEY);
       }
       CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
-      debugLog.info(LogCategory.CATEGORIES, 'Using default categories');
     }
-  } catch (err) {
-    debugLog.error(LogCategory.CATEGORIES, 'loadCustomCategories failed', { error: String(err) });
+  } catch {
     CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
   }
-
-  const elapsed = Date.now() - startTime;
-  debugLog.info(LogCategory.CATEGORIES, `loadCustomCategories completed in ${elapsed}ms`);
-  await persistLogs();
 }
 
 /**

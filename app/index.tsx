@@ -38,7 +38,6 @@ import {
   saveGameState,
   startNewGame,
 } from '@/store/game-store';
-import { debugLog, LogCategory, persistLogs } from '@/utils/debug-logger';
 
 export default function ImpostorGame() {
   const [state, setState] = useState<GameState>(createInitialState());
@@ -55,45 +54,28 @@ export default function ImpostorGame() {
   // Load saved state on mount (categories already loaded in _layout.tsx)
   useEffect(() => {
     (async () => {
-      const startTime = Date.now();
-      debugLog.info(LogCategory.UI, 'ImpostorGame mount effect started');
-
       try {
         // Categories already loaded in _layout.tsx, just get current options
-        debugLog.debug(LogCategory.UI, 'Getting category options (already loaded in layout)');
         setCategoryOptions(getCategoryOptions());
 
-        debugLog.debug(LogCategory.UI, 'Loading game state...');
         const saved = await loadGameState();
-        debugLog.info(LogCategory.UI, 'Game state retrieved', {
-          hasPlayers: (saved.players?.length ?? 0) > 0,
-          playerCount: saved.players?.length ?? 0,
-        });
 
         if (saved.players && saved.players.length > 0) {
-          debugLog.debug(LogCategory.UI, 'Restoring saved state');
           setState(prev => ({
             ...prev,
             players: saved.players || [],
             selectedCategory: saved.selectedCategory || 'mixta',
             selectedVariant: saved.selectedVariant || 'classic',
           }));
-
         }
 
-        // Enable animations after initial render (for both restored and new games)
+        // Enable animations after initial render
         setTimeout(() => {
           isInitialLoad.current = false;
         }, 100);
-
-        const elapsed = Date.now() - startTime;
-        debugLog.info(LogCategory.UI, `ImpostorGame initialization completed in ${elapsed}ms`);
-      } catch (err) {
-        debugLog.error(LogCategory.UI, 'ImpostorGame initialization failed', { error: String(err) });
+      } catch {
         setCategoryOptions(getCategoryOptions());
       }
-
-      await persistLogs();
     })();
   }, []);
 
@@ -102,7 +84,6 @@ export default function ImpostorGame() {
     useCallback(() => {
       // Only refresh if we previously navigated away
       if (hasNavigatedAway.current) {
-        debugLog.debug(LogCategory.UI, 'Returned from settings, refreshing categories');
         loadCustomCategories()
           .then(() => setCategoryOptions(getCategoryOptions()))
           .catch(() => setCategoryOptions(getCategoryOptions()));
