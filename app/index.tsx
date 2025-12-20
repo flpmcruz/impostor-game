@@ -51,15 +51,19 @@ export default function ImpostorGame() {
   // Track if we've navigated away (to know when to refresh on focus)
   const hasNavigatedAway = React.useRef(false);
 
-  // Load saved state on mount (categories already loaded in _layout.tsx)
+  // Load saved state on mount (non-blocking)
   useEffect(() => {
-    (async () => {
-      try {
-        // Categories already loaded in _layout.tsx, just get current options
-        setCategoryOptions(getCategoryOptions());
+    // Get current category options
+    setCategoryOptions(getCategoryOptions());
 
-        const saved = await loadGameState();
+    // Enable animations after initial render
+    const timer = setTimeout(() => {
+      isInitialLoad.current = false;
+    }, 100);
 
+    // Load saved game state in background
+    loadGameState()
+      .then((saved) => {
         if (saved.players && saved.players.length > 0) {
           setState(prev => ({
             ...prev,
@@ -68,15 +72,10 @@ export default function ImpostorGame() {
             selectedVariant: saved.selectedVariant || 'classic',
           }));
         }
+      })
+      .catch(() => {});
 
-        // Enable animations after initial render
-        setTimeout(() => {
-          isInitialLoad.current = false;
-        }, 100);
-      } catch {
-        setCategoryOptions(getCategoryOptions());
-      }
-    })();
+    return () => clearTimeout(timer);
   }, []);
 
   // Refresh categories ONLY when returning from settings

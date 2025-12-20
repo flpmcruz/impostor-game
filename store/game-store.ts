@@ -11,19 +11,7 @@ import * as Crypto from 'expo-crypto';
 const STORAGE_KEY = 'impostor_game_v1';
 const CUSTOM_CATEGORIES_KEY = 'impostor_custom_categories_v1';
 
-// ============ RESILIENT STORAGE UTILITIES ============
-
-const STORAGE_TIMEOUT = 5000; // 5 seconds max for any storage operation
-
-/**
- * Wrap a promise with a timeout
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ]);
-}
+// ============ SIMPLE STORAGE UTILITIES ============
 
 /**
  * Safely parse JSON with validation
@@ -42,54 +30,14 @@ function safeJsonParse<T>(json: string | null, validator?: (data: unknown) => da
 }
 
 /**
- * Safe storage read with timeout and error recovery
- */
-async function safeStorageGet(key: string): Promise<string | null> {
-  try {
-    return await withTimeout(AsyncStorage.getItem(key), STORAGE_TIMEOUT, null);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Safe storage write with timeout and error recovery
- */
-async function safeStorageSet(key: string, value: string): Promise<boolean> {
-  try {
-    await withTimeout(
-      AsyncStorage.setItem(key, value),
-      STORAGE_TIMEOUT,
-      undefined
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Safe storage remove with timeout
- */
-async function safeStorageRemove(key: string): Promise<boolean> {
-  try {
-    await withTimeout(
-      AsyncStorage.removeItem(key),
-      STORAGE_TIMEOUT,
-      undefined
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Clear potentially corrupted data
  */
 export async function clearCorruptedData(): Promise<void> {
-  await safeStorageRemove(STORAGE_KEY);
-  await safeStorageRemove(CUSTOM_CATEGORIES_KEY);
+  try {
+    await AsyncStorage.multiRemove([STORAGE_KEY, CUSTOM_CATEGORIES_KEY]);
+  } catch {
+    // Ignore errors
+  }
 }
 
 // Category type definition
@@ -359,20 +307,13 @@ export interface GameState {
  */
 async function secureRandom(max: number): Promise<number> {
   try {
-    const randomBytes = await withTimeout(
-      Crypto.getRandomBytesAsync(4),
-      2000,
-      null
-    );
-    if (randomBytes) {
-      const randomValue = new DataView(randomBytes.buffer).getUint32(0, true);
-      return randomValue % max;
-    }
+    const randomBytes = await Crypto.getRandomBytesAsync(4);
+    const randomValue = new DataView(randomBytes.buffer).getUint32(0, true);
+    return randomValue % max;
   } catch {
-    // Silently fail - Math.random is not secure but good enough for our use case
+    // Fallback to Math.random if crypto fails
+    return Math.floor(Math.random() * max);
   }
-  // Fallback to Math.random if crypto fails
-  return Math.floor(Math.random() * max);
 }
 
 /**
@@ -458,18 +399,19 @@ export async function saveGameState(state: Partial<GameState>): Promise<boolean>
     // Save directly without loading existing state (optimization)
     // Since we always save all 3 fields together, no merge needed
     const json = JSON.stringify(configToSave);
-    return await safeStorageSet(STORAGE_KEY, json);
+    await AsyncStorage.setItem(STORAGE_KEY, json);
+    return true;
   } catch {
     return false;
   }
 }
 
 /**
- * Load game state from storage (resilient)
+ * Load game state from storage
  */
 export async function loadGameState(): Promise<Partial<GameState>> {
   try {
-    const saved = await safeStorageGet(STORAGE_KEY);
+    const saved = await AsyncStorage.getItem(STORAGE_KEY);
     const parsed = safeJsonParse<Partial<GameState>>(saved, isValidGameState);
 
     if (parsed) {
@@ -477,7 +419,7 @@ export async function loadGameState(): Promise<Partial<GameState>> {
     }
 
     if (saved !== null) {
-      await safeStorageRemove(STORAGE_KEY);
+      await AsyncStorage.removeItem(STORAGE_KEY);
     }
   } catch {
     // Silently fail
@@ -487,10 +429,15 @@ export async function loadGameState(): Promise<Partial<GameState>> {
 }
 
 /**
- * Clear all saved game state (resilient)
+ * Clear all saved game state
  */
 export async function clearGameState(): Promise<boolean> {
-  return await safeStorageRemove(STORAGE_KEY);
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ============ CATEGORY MANAGEMENT ============
@@ -516,11 +463,11 @@ function isValidCategories(data: unknown): data is Categories {
 }
 
 /**
- * Load custom categories from storage (resilient)
+ * Load custom categories from storage
  */
 export async function loadCustomCategories(): Promise<void> {
   try {
-    const saved = await safeStorageGet(CUSTOM_CATEGORIES_KEY);
+    const saved = await AsyncStorage.getItem(CUSTOM_CATEGORIES_KEY);
     const customCategories = safeJsonParse<Categories>(saved, isValidCategories);
 
     if (customCategories) {
@@ -530,7 +477,7 @@ export async function loadCustomCategories(): Promise<void> {
       });
     } else {
       if (saved !== null) {
-        await safeStorageRemove(CUSTOM_CATEGORIES_KEY);
+        await AsyncStorage.removeItem(CUSTOM_CATEGORIES_KEY);
       }
       CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
     }
@@ -540,7 +487,7 @@ export async function loadCustomCategories(): Promise<void> {
 }
 
 /**
- * Save custom categories to storage (resilient)
+ * Save custom categories to storage
  */
 export async function saveCustomCategories(): Promise<boolean> {
   try {
@@ -563,19 +510,25 @@ export async function saveCustomCategories(): Promise<boolean> {
       }
     }
 
-    return await safeStorageSet(CUSTOM_CATEGORIES_KEY, JSON.stringify(customCategories));
+    await AsyncStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(customCategories));
+    return true;
   } catch {
     return false;
   }
 }
 
 /**
- * Reset all categories to defaults (resilient)
+ * Reset all categories to defaults
  */
 export async function resetCategoriesToDefault(): Promise<boolean> {
-  const success = await safeStorageRemove(CUSTOM_CATEGORIES_KEY);
-  CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
-  return success;
+  try {
+    await AsyncStorage.removeItem(CUSTOM_CATEGORIES_KEY);
+    CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
+    return true;
+  } catch {
+    CATEGORIES = updateMixedCategory({ ...DEFAULT_CATEGORIES });
+    return false;
+  }
 }
 
 /**
