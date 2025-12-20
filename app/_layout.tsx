@@ -11,10 +11,7 @@ import { loadCustomCategories } from '@/store/game-store';
 import { debugLog, initDebugLogger, LogCategory, persistLogs } from '@/utils/debug-logger';
 
 // Prevent splash screen from auto-hiding (with error handling)
-debugLog.info(LogCategory.INIT, 'App module loading, preventing splash auto-hide');
-SplashScreen.preventAutoHideAsync().catch((err) => {
-  debugLog.warn(LogCategory.INIT, 'preventAutoHideAsync failed', { error: String(err) });
-});
+// Splash screen is handled inside RootLayout to ensure proper sequencing
 
 export default function RootLayout() {
   const [appIsReady, setAppIsReady] = useState(false);
@@ -22,34 +19,46 @@ export default function RootLayout() {
   useEffect(() => {
     async function prepare() {
       const startTime = Date.now();
-      debugLog.info(LogCategory.INIT, 'RootLayout prepare() started');
 
       try {
-        // Initialize debug logger first
-        debugLog.info(LogCategory.INIT, 'Initializing debug logger...');
-        await initDebugLogger();
-        debugLog.info(LogCategory.INIT, 'Debug logger initialized');
+        // Enforce a maximum initialization time of 4 seconds to prevent getting stuck
+        await Promise.race([
+          (async () => {
+            // 1. Prevent auto-hide immediately inside the component life-cycle
+            await SplashScreen.preventAutoHideAsync().catch(() => { });
 
-        // Load custom categories before showing the app
-        debugLog.info(LogCategory.INIT, 'Loading custom categories with 3s timeout...');
-        const categoriesPromise = loadCustomCategories();
-        const timeoutPromise = new Promise<'timeout'>((resolve) =>
-          setTimeout(() => resolve('timeout'), 3000)
-        );
+            // 2. Initialize debug logger
+            debugLog.info(LogCategory.INIT, 'RootLayout prepare() started');
+            debugLog.info(LogCategory.INIT, 'Initializing debug logger...');
+            await initDebugLogger().catch(err => console.log('Logger init failed', err));
+            debugLog.info(LogCategory.INIT, 'Debug logger initialized');
 
-        const result = await Promise.race([categoriesPromise, timeoutPromise]);
+            // 3. Load custom categories with 3s timeout (internal timeout)
+            debugLog.info(LogCategory.INIT, 'Loading custom categories...');
+            const categoriesPromise = loadCustomCategories();
+            const categoriesTimeout = new Promise<'timeout'>((resolve) =>
+              setTimeout(() => resolve('timeout'), 2500)
+            );
 
-        if (result === 'timeout') {
-          debugLog.warn(LogCategory.INIT, 'Categories loading timed out after 3s');
-        } else {
-          debugLog.info(LogCategory.INIT, 'Categories loaded successfully');
-        }
+            const result = await Promise.race([categoriesPromise, categoriesTimeout]);
+
+            if (result === 'timeout') {
+              debugLog.warn(LogCategory.INIT, 'Categories loading timed out');
+            } else {
+              debugLog.info(LogCategory.INIT, 'Categories loaded successfully');
+            }
+          })(),
+          new Promise((resolve) => setTimeout(resolve, 4000))
+        ]);
+
       } catch (err) {
+        // This catch block handles errors in the race or unexpected crashes
         debugLog.error(LogCategory.INIT, 'Error in prepare()', { error: String(err) });
       } finally {
         const elapsed = Date.now() - startTime;
         debugLog.info(LogCategory.INIT, `prepare() completed in ${elapsed}ms`);
-        await persistLogs();
+        // Don't await persistLogs here to avoid blocking IO
+        persistLogs().catch(() => { });
         setAppIsReady(true);
       }
     }
