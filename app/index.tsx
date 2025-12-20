@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -47,6 +47,7 @@ export default function ImpostorGame() {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showVariantPicker, setShowVariantPicker] = useState(false);
   const [categoryOptions, setCategoryOptions] = useState(getCategoryOptions());
+  const isInitialLoad = useRef(true);
 
   // Track if we've navigated away (to know when to refresh on focus)
   const hasNavigatedAway = React.useRef(false);
@@ -77,7 +78,13 @@ export default function ImpostorGame() {
             selectedCategory: saved.selectedCategory || 'mixta',
             selectedVariant: saved.selectedVariant || 'classic',
           }));
+
         }
+
+        // Enable animations after initial render (for both restored and new games)
+        setTimeout(() => {
+          isInitialLoad.current = false;
+        }, 100);
 
         const elapsed = Date.now() - startTime;
         debugLog.info(LogCategory.UI, `ImpostorGame initialization completed in ${elapsed}ms`);
@@ -134,9 +141,9 @@ export default function ImpostorGame() {
       };
 
       if (type === 'success' || type === 'warning' || type === 'error') {
-        Haptics.notificationAsync(styles[type] as Haptics.NotificationFeedbackType).catch(() => {});
+        Haptics.notificationAsync(styles[type] as Haptics.NotificationFeedbackType).catch(() => { });
       } else {
-        Haptics.impactAsync(styles[type] as Haptics.ImpactFeedbackStyle).catch(() => {});
+        Haptics.impactAsync(styles[type] as Haptics.ImpactFeedbackStyle).catch(() => { });
       }
     } catch {
       // Haptics not available - silently ignore
@@ -307,412 +314,317 @@ export default function ImpostorGame() {
           style={styles.keyboardView}
         >
           {/* SETUP SCREEN */}
-        {state.currentScreen === 'setup' && (
-          <Animated.View
-            entering={FadeIn.duration(300)}
-            exiting={FadeOut.duration(200)}
-            style={styles.screenContainer}
-          >
-            {/* Header Row: Category + Variant + Help + Settings */}
-            <View style={styles.headerRow}>
-              <View style={styles.headerChips}>
-                <TouchableOpacity
-                  style={styles.categoryChip}
-                  onPress={() => {
-                    hapticFeedback('light');
-                    setShowCategoryPicker(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.categoryChipEmoji}>
-                    {selectedCategoryInfo.emoji}
-                  </Text>
-                  <Text style={styles.categoryChipText} numberOfLines={1}>
-                    {selectedCategoryInfo.name}
-                  </Text>
-                  <Ionicons name="chevron-down" size={14} color={GameColors.textMuted} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.categoryChip,
-                    !isVariantValid(state.selectedVariant, state.players.length) && styles.chipDisabled
-                  ]}
-                  onPress={() => {
-                    hapticFeedback('light');
-                    setShowVariantPicker(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.categoryChipText}>
-                    {selectedVariantInfo.emoji}
-                  </Text>
-                  <Ionicons name="chevron-down" size={14} color={GameColors.textMuted} />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.headerButtons}>
-                <TouchableOpacity
-                  style={styles.helpButton}
-                  onPress={() => {
-                    hapticFeedback('light');
-                    router.push('/help');
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.helpButtonText}>?</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.settingsButton}
-                  onPress={() => {
-                    hapticFeedback('light');
-                    router.push('/settings');
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="settings-outline" size={22} color={GameColors.textMuted} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Fixed Header Section */}
-            <View style={styles.setupHeader}>
-              <Text style={styles.title}>🕵️‍♂️ El Impostor</Text>
-              <Text style={styles.subtitle}>
-                Agrega a los jugadores (Mínimo 3)
-              </Text>
-
-              <View style={styles.inputRow}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Nombre del jugador..."
-                  placeholderTextColor={GameColors.textMuted}
-                  value={playerInput}
-                  onChangeText={setPlayerInput}
-                  onSubmitEditing={addPlayer}
-                  returnKeyType="done"
-                  autoCapitalize="words"
-                />
-                <TouchableOpacity
-                  style={styles.addButton}
-                  onPress={addPlayer}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.addButtonText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Scrollable Player List */}
-            <ScrollView
-              style={styles.playerScrollView}
-              contentContainerStyle={styles.playerScrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {state.players.length > 0 && (
-                <View style={styles.playerList}>
-                  {state.players.map((player, index) => (
-                    <Animated.View
-                      key={`${player}-${index}`}
-                      entering={SlideInRight.delay(index * 50)}
-                      exiting={SlideOutLeft}
-                      style={styles.playerItem}
-                    >
-                      <Text style={styles.playerName}>{player}</Text>
-                      <TouchableOpacity
-                        onPress={() => removePlayer(index)}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      >
-                        <Text style={styles.removeButton}>✖</Text>
-                      </TouchableOpacity>
-                    </Animated.View>
-                  ))}
-                </View>
-              )}
-            </ScrollView>
-
-            {/* Floating Action Button */}
-            {state.players.length >= 3 && (
-              <Animated.View
-                entering={ZoomIn.springify()}
-                style={styles.fabContainer}
-              >
-                <TouchableOpacity
-                  style={styles.fab}
-                  onPress={handleStartGame}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="play" size={28} color="#FFFFFF" />
-                </TouchableOpacity>
-              </Animated.View>
-            )}
-          </Animated.View>
-        )}
-
-        {/* PASS SCREEN */}
-        {state.currentScreen === 'pass' && (
-          <Animated.View
-            entering={FadeIn.duration(300)}
-            exiting={FadeOut.duration(200)}
-            style={styles.centerContainer}
-          >
-            <Text style={styles.progressText}>
-              Jugador {state.currentPlayerIndex + 1} de{' '}
-              {state.shuffledPlayers.length}
-            </Text>
-
-            <Text style={styles.title}>
-              Turno de:{' '}
-              <Text style={styles.accentText}>{currentPlayer}</Text>
-            </Text>
-
-            <Animated.Text
-              entering={ZoomIn.delay(200)}
-              style={styles.bigEmoji}
-            >
-              🤫
-            </Animated.Text>
-
-            <Text style={styles.instruction}>
-              Pasa el dispositivo a este jugador.
-            </Text>
-            <Text style={styles.instruction}>
-              Asegúrate de que nadie más mire.
-            </Text>
-
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                isButtonDisabled && styles.buttonDisabled,
-              ]}
-              onPress={handleRevealRole}
-              disabled={isButtonDisabled}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.primaryButtonText}>Ver mi papel</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-
-        {/* REVEAL SCREEN */}
-        {state.currentScreen === 'reveal' && currentPlayerRole && (
-          <Animated.View
-            entering={FadeIn.duration(300)}
-            exiting={FadeOut.duration(200)}
-            style={styles.centerContainer}
-          >
-            <Text style={styles.roleTitle}>
-              {currentPlayerRole.role === 'citizen' ? 'LA PALABRA ES' : 'TÚ ERES EL'}
-            </Text>
-
+          {state.currentScreen === 'setup' && (
             <Animated.View
-              entering={ZoomIn.delay(200).springify()}
-              style={[
-                styles.roleCard,
-                currentPlayerRole.role === 'impostor' && styles.impostorCard,
-                currentPlayerRole.role === 'citizen' && styles.citizenCard,
-                currentPlayerRole.role === 'jester' && styles.jesterCard,
-              ]}
+              entering={FadeIn.duration(300)}
+              exiting={FadeOut.duration(200)}
+              style={styles.screenContainer}
             >
-              {/* Role display based on player's role */}
-              {currentPlayerRole.role === 'impostor' && (
-                <>
-                  <Text style={[styles.secretWord, { color: GameColors.impostor }]}>
-                    👺 IMPOSTOR
-                  </Text>
-                  <Text style={styles.roleDescription}>
-                    No sabes la palabra secreta. ¡Miente y mézclate!
-                  </Text>
-                  {currentPlayerRole.partnerName && (
-                    <View style={styles.partnerInfo}>
-                      <Text style={styles.partnerLabel}>Tu compinche es:</Text>
-                      <Text style={styles.partnerName}>{currentPlayerRole.partnerName}</Text>
-                    </View>
-                  )}
-                </>
-              )}
+              {/* Header Row: Category + Variant + Help + Settings */}
+              <View style={styles.headerRow}>
+                <View style={styles.headerChips}>
+                  <TouchableOpacity
+                    style={styles.categoryChip}
+                    onPress={() => {
+                      hapticFeedback('light');
+                      setShowCategoryPicker(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.categoryChipEmoji}>
+                      {selectedCategoryInfo.emoji}
+                    </Text>
+                    <Text style={styles.categoryChipText} numberOfLines={1}>
+                      {selectedCategoryInfo.name}
+                    </Text>
+                    <Ionicons name="chevron-down" size={14} color={GameColors.textMuted} />
+                  </TouchableOpacity>
 
-              {currentPlayerRole.role === 'jester' && (
-                <>
-                  <Text style={[styles.secretWord, { color: GameColors.jester }]}>
-                    🤡 BUFÓN
-                  </Text>
-                  <Text style={styles.roleDescription}>
-                    ¡Tu objetivo es que te voten! Actúa sospechoso pero no muy obvio.
-                  </Text>
-                  <View style={styles.wordHint}>
-                    <Text style={styles.wordHintLabel}>La palabra es:</Text>
-                    <Text style={styles.wordHintValue}>{state.secretWord}</Text>
-                  </View>
-                </>
-              )}
+                  <TouchableOpacity
+                    style={[
+                      styles.categoryChip,
+                      !isVariantValid(state.selectedVariant, state.players.length) && styles.chipDisabled
+                    ]}
+                    onPress={() => {
+                      hapticFeedback('light');
+                      setShowVariantPicker(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.categoryChipText}>
+                      {selectedVariantInfo.emoji}
+                    </Text>
+                    <Ionicons name="chevron-down" size={14} color={GameColors.textMuted} />
+                  </TouchableOpacity>
+                </View>
 
-              {currentPlayerRole.role === 'citizen' && (
-                <>
-                  <Text style={[styles.secretWord, { color: GameColors.citizen }]}>
-                    {state.secretWord}
-                  </Text>
-                  <Text style={styles.roleDescription}>
-                    Eres un ciudadano inocente. Encuentra al impostor.
-                  </Text>
-                </>
-              )}
-            </Animated.View>
+                <View style={styles.headerButtons}>
+                  <TouchableOpacity
+                    style={styles.helpButton}
+                    onPress={() => {
+                      hapticFeedback('light');
+                      router.push('/help');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.helpButtonText}>?</Text>
+                  </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                isButtonDisabled && styles.buttonDisabled,
-              ]}
-              onPress={handleNextPlayer}
-              disabled={isButtonDisabled}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.primaryButtonText}>Entendido, ocultar</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
+                  <TouchableOpacity
+                    style={styles.settingsButton}
+                    onPress={() => {
+                      hapticFeedback('light');
+                      router.push('/settings');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="settings-outline" size={22} color={GameColors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              </View>
 
-        {/* PLAYING SCREEN */}
-        {state.currentScreen === 'playing' && (
-          <Animated.View
-            entering={FadeIn.duration(300)}
-            exiting={FadeOut.duration(200)}
-            style={styles.centerContainer}
-          >
-            <Text style={styles.title}>¡A JUGAR! 🗣️</Text>
-
-            <View style={styles.variantBadge}>
-              <Text style={styles.variantBadgeText}>
-                {selectedVariantInfo.emoji} {selectedVariantInfo.name}
-              </Text>
-            </View>
-
-            <Text style={styles.instruction}>
-              {state.impostorIndices.length > 1
-                ? 'Los impostores están entre nosotros.'
-                : 'El impostor está entre nosotros.'}
-            </Text>
-            <Text style={styles.instruction}>
-              Hagan preguntas sutiles para descubrirlo{state.impostorIndices.length > 1 ? 's' : ''}.
-            </Text>
-            {state.jesterIndex >= 0 && (
-              <Text style={[styles.instruction, { color: GameColors.jester }]}>
-                ⚠️ ¡Cuidado! Hay un bufón que quiere ser votado.
-              </Text>
-            )}
-
-            <View style={styles.infoCard}>
-              <Text style={styles.infoLabel}>Jugador Inicial Sugerido:</Text>
-              <Text style={styles.infoValue}>{state.starterPlayer}</Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.endGameButton}
-              onPress={handleEndGame}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.endGameButtonText}>
-                🎭 Finalizar y Revelar Roles
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handlePlayAgain}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.secondaryButtonText}>
-                Jugar de nuevo (mismos jugadores)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.dangerButton}
-              onPress={handleResetAll}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.dangerButtonText}>
-                🗑️ Borrar todo y empezar de cero
-              </Text>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-
-        {/* END SCREEN */}
-        {state.currentScreen === 'end' && (
-          <Animated.View
-            entering={FadeIn.duration(300)}
-            exiting={FadeOut.duration(200)}
-            style={styles.centerContainer}
-          >
-            <Text style={styles.title}>🎭 ¡JUEGO TERMINADO!</Text>
-
-            <ScrollView
-              style={styles.endScrollView}
-              contentContainerStyle={styles.endScrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {/* Impostors reveal */}
-              <Animated.View
-                entering={ZoomIn.delay(200)}
-                style={styles.revealCard}
-              >
-                <Text style={styles.revealLabel}>
-                  {state.impostorIndices.length > 1 ? 'Los impostores eran:' : 'El impostor era:'}
+              {/* Fixed Header Section */}
+              <View style={styles.setupHeader}>
+                <Text style={styles.title}>🕵️‍♂️ El Impostor</Text>
+                <Text style={styles.subtitle}>
+                  Agrega a los jugadores (Mínimo 3)
                 </Text>
-                {state.impostorIndices.map((idx, i) => (
-                  <Text key={idx} style={styles.impostorName}>
-                    👺 {state.shuffledPlayers[idx]}
-                  </Text>
-                ))}
-              </Animated.View>
 
-              {/* Jester reveal (if applicable) */}
-              {state.jesterIndex >= 0 && (
+                <View style={styles.inputRow}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Nombre del jugador..."
+                    placeholderTextColor={GameColors.textMuted}
+                    value={playerInput}
+                    onChangeText={setPlayerInput}
+                    onSubmitEditing={addPlayer}
+                    returnKeyType="done"
+                    autoCapitalize="words"
+                  />
+                  <TouchableOpacity
+                    style={styles.addButton}
+                    onPress={addPlayer}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.addButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Scrollable Player List */}
+              <ScrollView
+                style={styles.playerScrollView}
+                contentContainerStyle={styles.playerScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {state.players.length > 0 && (
+                  <View style={styles.playerList}>
+                    {state.players.map((player, index) => (
+                      <Animated.View
+                        key={`${player}-${index}`}
+                        entering={isInitialLoad.current ? undefined : SlideInRight.delay(index * 50)}
+                        exiting={SlideOutLeft}
+                        style={styles.playerItem}
+                      >
+                        <Text style={styles.playerName}>{player}</Text>
+                        <TouchableOpacity
+                          onPress={() => removePlayer(index)}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                          <Text style={styles.removeButton}>✖</Text>
+                        </TouchableOpacity>
+                      </Animated.View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+
+              {/* Floating Action Button */}
+              {state.players.length >= 3 && (
                 <Animated.View
-                  entering={ZoomIn.delay(300)}
-                  style={styles.jesterRevealCard}
+                  entering={ZoomIn.springify()}
+                  style={styles.fabContainer}
                 >
-                  <Text style={styles.revealLabel}>El bufón era:</Text>
-                  <Text style={styles.jesterName}>
-                    🤡 {state.shuffledPlayers[state.jesterIndex]}
-                  </Text>
+                  <TouchableOpacity
+                    style={styles.fab}
+                    onPress={handleStartGame}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="play" size={28} color="#FFFFFF" />
+                  </TouchableOpacity>
                 </Animated.View>
               )}
+            </Animated.View>
+          )}
 
-              {/* Word reveal */}
-              <Animated.View
-                entering={ZoomIn.delay(400)}
-                style={styles.wordRevealCard}
-              >
-                <Text style={styles.revealLabel}>La palabra secreta era:</Text>
-                <Text style={styles.wordReveal}>{state.secretWord}</Text>
-              </Animated.View>
+          {/* PASS SCREEN */}
+          {state.currentScreen === 'pass' && (
+            <Animated.View
+              entering={FadeIn.duration(300)}
+              exiting={FadeOut.duration(200)}
+              style={styles.centerContainer}
+            >
+              <Text style={styles.progressText}>
+                Jugador {state.currentPlayerIndex + 1} de{' '}
+                {state.shuffledPlayers.length}
+              </Text>
 
-              {/* Win conditions hint */}
-              <Animated.View
-                entering={FadeIn.delay(500)}
-                style={styles.winConditionsCard}
+              <Text style={styles.title}>
+                Turno de:{' '}
+                <Text style={styles.accentText}>{currentPlayer}</Text>
+              </Text>
+
+              <Animated.Text
+                entering={ZoomIn.delay(200)}
+                style={styles.bigEmoji}
               >
-                <Text style={styles.winConditionsTitle}>¿Quién ganó?</Text>
-                <Text style={styles.winCondition}>
-                  🏆 <Text style={{ fontWeight: '700' }}>Ciudadanos:</Text> Si votaron a{' '}
-                  {state.impostorIndices.length > 1 ? 'los impostores' : 'el impostor'}
-                </Text>
-                <Text style={styles.winCondition}>
-                  👺 <Text style={{ fontWeight: '700' }}>Impostor{state.impostorIndices.length > 1 ? 'es' : ''}:</Text> Si no fueron descubiertos
-                </Text>
-                {state.jesterIndex >= 0 && (
-                  <Text style={styles.winCondition}>
-                    🤡 <Text style={{ fontWeight: '700' }}>Bufón:</Text> Si fue votado como sospechoso
-                  </Text>
+                🤫
+              </Animated.Text>
+
+              <Text style={styles.instruction}>
+                Pasa el dispositivo a este jugador.
+              </Text>
+              <Text style={styles.instruction}>
+                Asegúrate de que nadie más mire.
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  isButtonDisabled && styles.buttonDisabled,
+                ]}
+                onPress={handleRevealRole}
+                disabled={isButtonDisabled}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.primaryButtonText}>Ver mi papel</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+
+          {/* REVEAL SCREEN */}
+          {state.currentScreen === 'reveal' && currentPlayerRole && (
+            <Animated.View
+              entering={FadeIn.duration(300)}
+              exiting={FadeOut.duration(200)}
+              style={styles.centerContainer}
+            >
+              <Text style={styles.roleTitle}>
+                {currentPlayerRole.role === 'citizen' ? 'LA PALABRA ES' : 'TÚ ERES EL'}
+              </Text>
+
+              <Animated.View
+                entering={ZoomIn.delay(200).springify()}
+                style={[
+                  styles.roleCard,
+                  currentPlayerRole.role === 'impostor' && styles.impostorCard,
+                  currentPlayerRole.role === 'citizen' && styles.citizenCard,
+                  currentPlayerRole.role === 'jester' && styles.jesterCard,
+                ]}
+              >
+                {/* Role display based on player's role */}
+                {currentPlayerRole.role === 'impostor' && (
+                  <>
+                    <Text style={[styles.secretWord, { color: GameColors.impostor }]}>
+                      👺 IMPOSTOR
+                    </Text>
+                    <Text style={styles.roleDescription}>
+                      No sabes la palabra secreta. ¡Miente y mézclate!
+                    </Text>
+                    {currentPlayerRole.partnerName && (
+                      <View style={styles.partnerInfo}>
+                        <Text style={styles.partnerLabel}>Tu compinche es:</Text>
+                        <Text style={styles.partnerName}>{currentPlayerRole.partnerName}</Text>
+                      </View>
+                    )}
+                  </>
+                )}
+
+                {currentPlayerRole.role === 'jester' && (
+                  <>
+                    <Text style={[styles.secretWord, { color: GameColors.jester }]}>
+                      🤡 BUFÓN
+                    </Text>
+                    <Text style={styles.roleDescription}>
+                      ¡Tu objetivo es que te voten! Actúa sospechoso pero no muy obvio.
+                    </Text>
+                    <View style={styles.wordHint}>
+                      <Text style={styles.wordHintLabel}>La palabra es:</Text>
+                      <Text style={styles.wordHintValue}>{state.secretWord}</Text>
+                    </View>
+                  </>
+                )}
+
+                {currentPlayerRole.role === 'citizen' && (
+                  <>
+                    <Text style={[styles.secretWord, { color: GameColors.citizen }]}>
+                      {state.secretWord}
+                    </Text>
+                    <Text style={styles.roleDescription}>
+                      Eres un ciudadano inocente. Encuentra al impostor.
+                    </Text>
+                  </>
                 )}
               </Animated.View>
-            </ScrollView>
 
-            <View style={styles.endButtons}>
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  isButtonDisabled && styles.buttonDisabled,
+                ]}
+                onPress={handleNextPlayer}
+                disabled={isButtonDisabled}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.primaryButtonText}>Entendido, ocultar</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+
+          {/* PLAYING SCREEN */}
+          {state.currentScreen === 'playing' && (
+            <Animated.View
+              entering={FadeIn.duration(300)}
+              exiting={FadeOut.duration(200)}
+              style={styles.centerContainer}
+            >
+              <Text style={styles.title}>¡A JUGAR! 🗣️</Text>
+
+              <View style={styles.variantBadge}>
+                <Text style={styles.variantBadgeText}>
+                  {selectedVariantInfo.emoji} {selectedVariantInfo.name}
+                </Text>
+              </View>
+
+              <Text style={styles.instruction}>
+                {state.impostorIndices.length > 1
+                  ? 'Los impostores están entre nosotros.'
+                  : 'El impostor está entre nosotros.'}
+              </Text>
+              <Text style={styles.instruction}>
+                Hagan preguntas sutiles para descubrirlo{state.impostorIndices.length > 1 ? 's' : ''}.
+              </Text>
+              {state.jesterIndex >= 0 && (
+                <Text style={[styles.instruction, { color: GameColors.jester }]}>
+                  ⚠️ ¡Cuidado! Hay un bufón que quiere ser votado.
+                </Text>
+              )}
+
+              <View style={styles.infoCard}>
+                <Text style={styles.infoLabel}>Jugador Inicial Sugerido:</Text>
+                <Text style={styles.infoValue}>{state.starterPlayer}</Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.endGameButton}
+                onPress={handleEndGame}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.endGameButtonText}>
+                  🎭 Finalizar y Revelar Roles
+                </Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={handlePlayAgain}
@@ -720,16 +632,6 @@ export default function ImpostorGame() {
               >
                 <Text style={styles.secondaryButtonText}>
                   Jugar de nuevo (mismos jugadores)
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={handleBackToSetup}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.secondaryButtonText}>
-                  Volver a configuración
                 </Text>
               </TouchableOpacity>
 
@@ -742,9 +644,114 @@ export default function ImpostorGame() {
                   🗑️ Borrar todo y empezar de cero
                 </Text>
               </TouchableOpacity>
-            </View>
-          </Animated.View>
-        )}
+            </Animated.View>
+          )}
+
+          {/* END SCREEN */}
+          {state.currentScreen === 'end' && (
+            <Animated.View
+              entering={FadeIn.duration(300)}
+              exiting={FadeOut.duration(200)}
+              style={styles.centerContainer}
+            >
+              <Text style={styles.title}>🎭 ¡JUEGO TERMINADO!</Text>
+
+              <ScrollView
+                style={styles.endScrollView}
+                contentContainerStyle={styles.endScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* Impostors reveal */}
+                <Animated.View
+                  entering={ZoomIn.delay(200)}
+                  style={styles.revealCard}
+                >
+                  <Text style={styles.revealLabel}>
+                    {state.impostorIndices.length > 1 ? 'Los impostores eran:' : 'El impostor era:'}
+                  </Text>
+                  {state.impostorIndices.map((idx, i) => (
+                    <Text key={idx} style={styles.impostorName}>
+                      👺 {state.shuffledPlayers[idx]}
+                    </Text>
+                  ))}
+                </Animated.View>
+
+                {/* Jester reveal (if applicable) */}
+                {state.jesterIndex >= 0 && (
+                  <Animated.View
+                    entering={ZoomIn.delay(300)}
+                    style={styles.jesterRevealCard}
+                  >
+                    <Text style={styles.revealLabel}>El bufón era:</Text>
+                    <Text style={styles.jesterName}>
+                      🤡 {state.shuffledPlayers[state.jesterIndex]}
+                    </Text>
+                  </Animated.View>
+                )}
+
+                {/* Word reveal */}
+                <Animated.View
+                  entering={ZoomIn.delay(400)}
+                  style={styles.wordRevealCard}
+                >
+                  <Text style={styles.revealLabel}>La palabra secreta era:</Text>
+                  <Text style={styles.wordReveal}>{state.secretWord}</Text>
+                </Animated.View>
+
+                {/* Win conditions hint */}
+                <Animated.View
+                  entering={FadeIn.delay(500)}
+                  style={styles.winConditionsCard}
+                >
+                  <Text style={styles.winConditionsTitle}>¿Quién ganó?</Text>
+                  <Text style={styles.winCondition}>
+                    🏆 <Text style={{ fontWeight: '700' }}>Ciudadanos:</Text> Si votaron a{' '}
+                    {state.impostorIndices.length > 1 ? 'los impostores' : 'el impostor'}
+                  </Text>
+                  <Text style={styles.winCondition}>
+                    👺 <Text style={{ fontWeight: '700' }}>Impostor{state.impostorIndices.length > 1 ? 'es' : ''}:</Text> Si no fueron descubiertos
+                  </Text>
+                  {state.jesterIndex >= 0 && (
+                    <Text style={styles.winCondition}>
+                      🤡 <Text style={{ fontWeight: '700' }}>Bufón:</Text> Si fue votado como sospechoso
+                    </Text>
+                  )}
+                </Animated.View>
+              </ScrollView>
+
+              <View style={styles.endButtons}>
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={handlePlayAgain}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    Jugar de nuevo (mismos jugadores)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={handleBackToSetup}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    Volver a configuración
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.dangerButton}
+                  onPress={handleResetAll}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.dangerButtonText}>
+                    🗑️ Borrar todo y empezar de cero
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          )}
         </KeyboardAvoidingView>
 
         {/* Category Picker Modal */}
@@ -779,7 +786,7 @@ export default function ImpostorGame() {
                       style={[
                         styles.categoryOption,
                         state.selectedCategory === cat.key &&
-                          styles.categoryOptionSelected,
+                        styles.categoryOptionSelected,
                       ]}
                       onPress={() => {
                         hapticFeedback('light');

@@ -59,16 +59,20 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (appIsReady) {
-      debugLog.info(LogCategory.INIT, 'App is ready, hiding splash screen');
-      // Hide splash screen once app is ready (with error handling)
-      SplashScreen.hideAsync()
-        .then(() => {
-          debugLog.info(LogCategory.INIT, 'Splash screen hidden successfully');
-          persistLogs();
-        })
-        .catch((err) => {
-          debugLog.warn(LogCategory.INIT, 'hideAsync failed', { error: String(err) });
-        });
+      // Add a small delay to ensure the UI is fully mounted before hiding splash
+      const timer = setTimeout(() => {
+        debugLog.info(LogCategory.INIT, 'App is ready, hiding splash screen');
+        SplashScreen.hideAsync()
+          .then(() => {
+            debugLog.info(LogCategory.INIT, 'Splash screen hidden successfully');
+            persistLogs();
+          })
+          .catch((err) => {
+            debugLog.warn(LogCategory.INIT, 'hideAsync failed', { error: String(err) });
+          });
+      }, 200);
+
+      return () => clearTimeout(timer);
     }
   }, [appIsReady]);
 
