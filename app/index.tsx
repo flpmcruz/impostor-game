@@ -38,6 +38,7 @@ import {
   saveGameState,
   startNewGame,
 } from '@/store/game-store';
+import { debugLog, LogCategory, persistLogs } from '@/utils/debug-logger';
 
 export default function ImpostorGame() {
   const [state, setState] = useState<GameState>(createInitialState());
@@ -47,14 +48,29 @@ export default function ImpostorGame() {
   const [showVariantPicker, setShowVariantPicker] = useState(false);
   const [categoryOptions, setCategoryOptions] = useState(getCategoryOptions());
 
-  // Load custom categories and saved state on mount (resilient)
+  // Track if initial load is done to avoid redundant calls
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Load saved state on mount (categories already loaded in _layout.tsx)
   useEffect(() => {
     (async () => {
+      const startTime = Date.now();
+      debugLog.info(LogCategory.UI, 'ImpostorGame mount effect started');
+
       try {
-        await loadCustomCategories();
+        // Categories already loaded in _layout.tsx, just get current options
+        debugLog.debug(LogCategory.UI, 'Getting category options (already loaded in layout)');
         setCategoryOptions(getCategoryOptions());
+
+        debugLog.debug(LogCategory.UI, 'Loading game state...');
         const saved = await loadGameState();
+        debugLog.info(LogCategory.UI, 'Game state retrieved', {
+          hasPlayers: (saved.players?.length ?? 0) > 0,
+          playerCount: saved.players?.length ?? 0,
+        });
+
         if (saved.players && saved.players.length > 0) {
+          debugLog.debug(LogCategory.UI, 'Restoring saved state');
           setState(prev => ({
             ...prev,
             players: saved.players || [],
@@ -62,20 +78,32 @@ export default function ImpostorGame() {
             selectedVariant: saved.selectedVariant || 'classic',
           }));
         }
-      } catch {
-        // Silently fail - app will work with defaults
+
+        const elapsed = Date.now() - startTime;
+        debugLog.info(LogCategory.UI, `ImpostorGame initialization completed in ${elapsed}ms`);
+        setIsInitialized(true);
+      } catch (err) {
+        debugLog.error(LogCategory.UI, 'ImpostorGame initialization failed', { error: String(err) });
         setCategoryOptions(getCategoryOptions());
+        setIsInitialized(true);
       }
+
+      await persistLogs();
     })();
   }, []);
 
-  // Refresh categories when screen gains focus (returning from settings)
+  // Refresh categories ONLY when returning from settings (not on initial mount)
   useFocusEffect(
     useCallback(() => {
+      if (!isInitialized) {
+        // Skip on initial mount - categories already loaded
+        return;
+      }
+      debugLog.debug(LogCategory.UI, 'Screen focused, refreshing categories');
       loadCustomCategories()
         .then(() => setCategoryOptions(getCategoryOptions()))
         .catch(() => setCategoryOptions(getCategoryOptions()));
-    }, [])
+    }, [isInitialized])
   );
 
   // Save players when they change (fire and forget, don't block UI)
@@ -293,8 +321,11 @@ export default function ImpostorGame() {
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.categoryChipText}>
-                    {selectedCategoryInfo.emoji} {selectedCategoryInfo.name}
+                  <Text style={styles.categoryChipEmoji}>
+                    {selectedCategoryInfo.emoji}
+                  </Text>
+                  <Text style={styles.categoryChipText} numberOfLines={1}>
+                    {selectedCategoryInfo.name}
                   </Text>
                   <Ionicons name="chevron-down" size={14} color={GameColors.textMuted} />
                 </TouchableOpacity>
@@ -903,12 +934,18 @@ const styles = StyleSheet.create({
     backgroundColor: GameColors.card,
     borderWidth: 1,
     borderColor: GameColors.inputBorder,
+    flexShrink: 1,
+    maxWidth: 160,
     ...Shadows.small,
+  },
+  categoryChipEmoji: {
+    fontSize: 14,
   },
   categoryChipText: {
     color: GameColors.text,
     fontSize: 14,
     fontWeight: '500',
+    flexShrink: 1,
   },
   settingsButton: {
     width: 44,
@@ -1266,11 +1303,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.sm,
     flex: 1,
+    minWidth: 0,
   },
   headerButtons: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
+    flexShrink: 0,
   },
   helpButton: {
     width: 44,

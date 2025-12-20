@@ -8,10 +8,12 @@ import 'react-native-reanimated';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { GameColors } from '@/constants/theme';
 import { loadCustomCategories } from '@/store/game-store';
+import { debugLog, initDebugLogger, LogCategory, persistLogs } from '@/utils/debug-logger';
 
 // Prevent splash screen from auto-hiding (with error handling)
-SplashScreen.preventAutoHideAsync().catch(() => {
-  // Ignore errors - splash screen may not be available
+debugLog.info(LogCategory.INIT, 'App module loading, preventing splash auto-hide');
+SplashScreen.preventAutoHideAsync().catch((err) => {
+  debugLog.warn(LogCategory.INIT, 'preventAutoHideAsync failed', { error: String(err) });
 });
 
 export default function RootLayout() {
@@ -19,16 +21,35 @@ export default function RootLayout() {
 
   useEffect(() => {
     async function prepare() {
+      const startTime = Date.now();
+      debugLog.info(LogCategory.INIT, 'RootLayout prepare() started');
+
       try {
+        // Initialize debug logger first
+        debugLog.info(LogCategory.INIT, 'Initializing debug logger...');
+        await initDebugLogger();
+        debugLog.info(LogCategory.INIT, 'Debug logger initialized');
+
         // Load custom categories before showing the app
-        await Promise.race([
-          loadCustomCategories(),
-          // Timeout after 3 seconds to prevent infinite loading
-          new Promise<void>((resolve) => setTimeout(resolve, 3000)),
-        ]);
-      } catch {
-        // Continue anyway - app will use defaults
+        debugLog.info(LogCategory.INIT, 'Loading custom categories with 3s timeout...');
+        const categoriesPromise = loadCustomCategories();
+        const timeoutPromise = new Promise<'timeout'>((resolve) =>
+          setTimeout(() => resolve('timeout'), 3000)
+        );
+
+        const result = await Promise.race([categoriesPromise, timeoutPromise]);
+
+        if (result === 'timeout') {
+          debugLog.warn(LogCategory.INIT, 'Categories loading timed out after 3s');
+        } else {
+          debugLog.info(LogCategory.INIT, 'Categories loaded successfully');
+        }
+      } catch (err) {
+        debugLog.error(LogCategory.INIT, 'Error in prepare()', { error: String(err) });
       } finally {
+        const elapsed = Date.now() - startTime;
+        debugLog.info(LogCategory.INIT, `prepare() completed in ${elapsed}ms`);
+        await persistLogs();
         setAppIsReady(true);
       }
     }
@@ -38,16 +59,25 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (appIsReady) {
+      debugLog.info(LogCategory.INIT, 'App is ready, hiding splash screen');
       // Hide splash screen once app is ready (with error handling)
-      SplashScreen.hideAsync().catch(() => {
-        // Ignore errors - splash screen may already be hidden
-      });
+      SplashScreen.hideAsync()
+        .then(() => {
+          debugLog.info(LogCategory.INIT, 'Splash screen hidden successfully');
+          persistLogs();
+        })
+        .catch((err) => {
+          debugLog.warn(LogCategory.INIT, 'hideAsync failed', { error: String(err) });
+        });
     }
   }, [appIsReady]);
 
   if (!appIsReady) {
+    debugLog.debug(LogCategory.INIT, 'Rendering null (app not ready)');
     return null;
   }
+
+  debugLog.debug(LogCategory.INIT, 'Rendering app content');
 
   return (
     <ErrorBoundary>

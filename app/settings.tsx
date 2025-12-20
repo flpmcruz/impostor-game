@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as Clipboard from 'expo-clipboard';
 import Animated, {
   FadeIn,
   FadeOut,
@@ -34,7 +35,9 @@ import {
   createCategory,
   deleteCategory,
   isCategoryModified,
+  clearCorruptedData,
 } from '@/store/game-store';
+import { getLogsAsString, clearLogs, debugLog, LogCategory } from '@/utils/debug-logger';
 
 export default function SettingsScreen() {
   const [categories, setCategories] = useState(getCategoryOptions());
@@ -303,6 +306,65 @@ export default function SettingsScreen() {
                 🔄 Restaurar todo a valores por defecto
               </Text>
             </TouchableOpacity>
+
+            {/* Debug Section */}
+            <View style={styles.debugSection}>
+              <Text style={styles.debugSectionTitle}>🔧 Diagnóstico</Text>
+              <Text style={styles.debugSectionSubtitle}>
+                Herramientas para solucionar problemas
+              </Text>
+
+              <TouchableOpacity
+                style={styles.debugButton}
+                onPress={async () => {
+                  hapticFeedback('light');
+                  debugLog.info(LogCategory.UI, 'User copied debug logs');
+                  const logs = getLogsAsString();
+                  await Clipboard.setStringAsync(logs);
+                  Alert.alert(
+                    'Logs copiados',
+                    'Los logs de diagnóstico se han copiado al portapapeles. Puedes pegarlos en un mensaje para reportar el problema.'
+                  );
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="copy-outline" size={20} color={GameColors.accent} />
+                <Text style={styles.debugButtonText}>Copiar logs de diagnóstico</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.debugButton}
+                onPress={() => {
+                  Alert.alert(
+                    'Limpiar datos',
+                    '¿Limpiar todos los datos guardados? Esto puede ayudar si la app tiene problemas al iniciar.',
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      {
+                        text: 'Limpiar',
+                        style: 'destructive',
+                        onPress: async () => {
+                          hapticFeedback('warning');
+                          debugLog.info(LogCategory.UI, 'User cleared corrupted data');
+                          await clearCorruptedData();
+                          await clearLogs();
+                          Alert.alert(
+                            'Datos limpiados',
+                            'Los datos se han limpiado. Reinicia la app para aplicar los cambios.'
+                          );
+                        },
+                      },
+                    ]
+                  );
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="trash-outline" size={20} color={GameColors.warning} />
+                <Text style={[styles.debugButtonText, { color: GameColors.warning }]}>
+                  Limpiar datos corruptos
+                </Text>
+              </TouchableOpacity>
+            </View>
           </Animated.View>
         )}
 
@@ -764,5 +826,40 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Debug section styles
+  debugSection: {
+    marginTop: Spacing.xxl,
+    marginBottom: Spacing.xxl,
+    padding: Spacing.md,
+    backgroundColor: GameColors.card,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: GameColors.inputBorder,
+  },
+  debugSectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: GameColors.text,
+    marginBottom: Spacing.xs,
+  },
+  debugSectionSubtitle: {
+    fontSize: 13,
+    color: GameColors.textSecondary,
+    marginBottom: Spacing.md,
+  },
+  debugButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: GameColors.inputBorder,
+  },
+  debugButtonText: {
+    fontSize: 15,
+    color: GameColors.accent,
+    fontWeight: '500',
   },
 });
